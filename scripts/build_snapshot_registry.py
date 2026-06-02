@@ -16,7 +16,7 @@ def build_snapshot_registry():
         if not date_folder.is_dir():
             continue
 
-        xml_files = list(date_folder.glob("*.xml")) + list(date_folder.glob("*.XML"))
+        xml_files = list({p.resolve() for p in date_folder.iterdir() if p.is_file() and p.suffix.lower() == ".xml"})
 
         rows.append({
             "snapshot_date": date_folder.name,
