@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import duckdb
 import pandas as pd
 
@@ -20,12 +23,7 @@ from src.parsers.nokia_parser import (
     parse_folder_parallel,
 )
 
-APP_NAME = "RAN Insight Oracle"
-
-# Formats acceptés:
-# DATA.XML/2025.02.13/
-# DATA.XML/2025-02-13/
-# DATA.XML/2025_02_13/
+APP_NAME = "ran-intelligence-platform"
 DATE_FOLDER_PATTERN = re.compile(r"^\d{4}[.\-_]\d{2}[.\-_]\d{2}$")
 
 

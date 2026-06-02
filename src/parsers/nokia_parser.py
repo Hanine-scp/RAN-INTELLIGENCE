@@ -7,6 +7,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from lxml import etree
 import pandas as pd
+
+
 # ============================================================
 # CONFIGURATION GÉNÉRALE
 # ============================================================
@@ -42,7 +44,7 @@ IP_FIELDS = [
 
 
 # ============================================================
-# OUTILS XML / TEXTE
+# OUTILS TEXTE / XML
 # ============================================================
 
 def safe_text(value: Optional[str]) -> Optional[str]:
@@ -57,13 +59,45 @@ def strip_ns(tag: str) -> str:
     return tag.split("}", 1)[1] if "}" in tag else tag
 
 
-def list_xml_files(xml_folder: str) -> List[Path]:
+def normalize_date(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+
+    value = str(value).strip()
+    value = value.replace(".", "-").replace("_", "-")
+
+    # Si date longue type 2025-02-13T10:30:00, on garde YYYY-MM-DD.
+    if len(value) >= 10 and value[4] == "-" and value[7] == "-":
+        return value[:10]
+
+    return value
+
+
+def list_xml_files(xml_folder: str | Path, recursive: bool = True) -> List[Path]:
+    """
+    Liste tous les fichiers XML disponibles dans un dossier.
+
+    recursive=True par défaut:
+        dossier/**/*.xml
+
+    Aucun maximum n'est appliqué.
+    Si le dossier contient 10, 1 000 ou 100 000 fichiers XML,
+    la fonction retourne tous les fichiers trouvés.
+    """
     folder = Path(xml_folder)
 
     if not folder.exists():
         raise FileNotFoundError(f"Dossier XML introuvable : {folder}")
 
-    files = sorted(folder.glob("*.xml"))
+    if not folder.is_dir():
+        raise NotADirectoryError(f"Le chemin n'est pas un dossier : {folder}")
+
+    pattern = "**/*.xml" if recursive else "*.xml"
+
+    files = sorted(
+        p for p in folder.glob(pattern)
+        if p.is_file() and p.suffix.lower() == ".xml"
+    )
 
     if not files:
         raise FileNotFoundError(f"Aucun fichier XML trouvé dans : {folder}")
@@ -92,12 +126,75 @@ def first(params: Dict[str, Optional[str]], keys: Iterable[str]) -> Optional[str
     return None
 
 
+def path_relative_to(path: Path, root: Optional[Path]) -> str:
+    if root is None:
+        return path.name
+
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return path.name
+
+
 # ============================================================
-# TABLE 1 — NETWORK FOOTPRINT / SITES
+# IDENTIFICATION SITE
+# ============================================================
+
+def extract_mrbts_id(dist_name: Optional[str]) -> Optional[str]:
+    """
+    Extrait un site_id stable depuis un DN Nokia.
+
+    Exemples:
+        PLMN-PLMN/MRBTS-12345          -> 12345
+        MRBTS-12345/LNBTS-12345        -> 12345
+        PLMN-PLMN/MRBTS-TUN001         -> TUN001
+
+    Si MRBTS n'existe pas, retourne le distName complet.
+    """
+    if not dist_name:
+        return None
+
+    text = str(dist_name).strip()
+
+    for part in text.split("/"):
+        if part.upper().startswith("MRBTS-"):
+            value = part.split("-", 1)[1].strip()
+            return value if value else text
+
+    return text
+
+
+def extract_mrbts_dn(dist_name: Optional[str]) -> Optional[str]:
+    """
+    Retourne le DN jusqu'à MRBTS.
+    """
+    if not dist_name:
+        return None
+
+    parts = []
+
+    for part in str(dist_name).split("/"):
+        parts.append(part)
+        if part.upper().startswith("MRBTS-"):
+            return "/".join(parts)
+
+    return None
+
+
+# ============================================================
+# TABLE 1 — SITES / NETWORK FOOTPRINT
 # ============================================================
 
 def infer_site_state(blocking_state: Optional[str]) -> str:
-    return "blocked" if str(blocking_state).strip().lower() == "blocked" else "active"
+    state = str(blocking_state or "").strip().lower()
+
+    if state == "blocked":
+        return "blocked"
+
+    if state in {"maintenance", "locked"}:
+        return "maintenance"
+
+    return "active"
 
 
 def classify_cell(class_name: Optional[str]) -> Optional[str]:
@@ -105,6 +202,7 @@ def classify_cell(class_name: Optional[str]) -> Optional[str]:
         return None
 
     c = str(class_name).strip()
+    c_lower = c.lower()
 
     if c == "com.nokia.srbts.gsm:GNCEL":
         return "2G"
@@ -115,13 +213,13 @@ def classify_cell(class_name: Optional[str]) -> Optional[str]:
     if c == "com.nokia.srbts.nrbts:NRCELL":
         return "5G"
 
-    if c == "NOKLTE:LNCEL":
+    if c_lower == "noklte:lncel":
         return "LTE_GENERIC"
 
-    if c.lower() == "noklte:lncel_fdd":
+    if c_lower == "noklte:lncel_fdd":
         return "LTE_FDD"
 
-    if c.lower() == "noklte:lncel_tdd":
+    if c_lower == "noklte:lncel_tdd":
         return "LTE_TDD"
 
     return None
@@ -129,8 +227,12 @@ def classify_cell(class_name: Optional[str]) -> Optional[str]:
 
 def build_site_row(
     xml_path: Path,
+    source_root: Optional[Path],
+    date_folder: Optional[str],
     snapshot_date: Optional[str],
+    xml_snapshot_date: Optional[str],
     site_id: Optional[str],
+    site_dn: Optional[str],
     site_name: Optional[str],
     blocking_state: Optional[str],
     sw_version: Optional[str],
@@ -171,8 +273,12 @@ def build_site_row(
 
     return {
         "source_file": xml_path.name,
+        "source_path": path_relative_to(xml_path, source_root),
+        "date_folder": date_folder,
         "snapshot_date": snapshot_date,
+        "xml_snapshot_date": xml_snapshot_date,
         "site_id": site_id,
+        "site_dn": site_dn,
         "site_name": site_name,
         "site_state": infer_site_state(blocking_state),
         "blocking_state": blocking_state,
@@ -191,7 +297,7 @@ def build_site_row(
 
 
 # ============================================================
-# TABLE 2 — HARDWARE INVENTORY / ÉQUIPEMENTS
+# TABLE 2 — ÉQUIPEMENTS / HARDWARE INVENTORY
 # ============================================================
 
 def object_type_from_class(class_name: str) -> str:
@@ -270,34 +376,42 @@ def enrich_equipment_with_reference(df: pd.DataFrame) -> pd.DataFrame:
     if ref_df.empty:
         return main_df
 
-    ref_lookup = ref_df[
-        [
-            "source_file",
-            "snapshot_date",
-            "site_id",
-            "base_object_type",
-            "id",
-            "serial_number",
-            "product_code",
-            "product_name",
-        ]
-    ].drop_duplicates().rename(
-        columns={
-            "serial_number": "ref_serial_number",
-            "product_code": "ref_product_code",
-            "product_name": "ref_product_name",
-        }
+    ref_lookup_cols = [
+        "source_file",
+        "snapshot_date",
+        "site_id",
+        "base_object_type",
+        "id",
+        "serial_number",
+        "product_code",
+        "product_name",
+    ]
+
+    ref_lookup = (
+        ref_df[[c for c in ref_lookup_cols if c in ref_df.columns]]
+        .drop_duplicates()
+        .rename(
+            columns={
+                "serial_number": "ref_serial_number",
+                "product_code": "ref_product_code",
+                "product_name": "ref_product_name",
+            }
+        )
     )
 
-    result = main_df.merge(
-        ref_lookup,
-        how="left",
-        on=["source_file", "snapshot_date", "site_id", "base_object_type", "id"],
-    )
+    merge_cols = [
+        c for c in ["source_file", "snapshot_date", "site_id", "base_object_type", "id"]
+        if c in main_df.columns and c in ref_lookup.columns
+    ]
 
-    result["serial_number"] = result["serial_number"].fillna(result["ref_serial_number"])
-    result["product_code"] = result["product_code"].fillna(result["ref_product_code"])
-    result["product_name"] = result["product_name"].fillna(result["ref_product_name"])
+    if not merge_cols:
+        return main_df
+
+    result = main_df.merge(ref_lookup, how="left", on=merge_cols)
+
+    result["serial_number"] = result["serial_number"].fillna(result.get("ref_serial_number"))
+    result["product_code"] = result["product_code"].fillna(result.get("ref_product_code"))
+    result["product_name"] = result["product_name"].fillna(result.get("ref_product_name"))
 
     return result.drop(
         columns=["ref_serial_number", "ref_product_code", "ref_product_name"],
@@ -313,58 +427,67 @@ def build_final_equipment_inventory(df_equipment: pd.DataFrame) -> pd.DataFrame:
 
     df = df[df["object_type"].isin(FINAL_EQUIPMENT_TYPES)].copy()
 
+    group_cols = [
+        "snapshot_date",
+        "date_folder",
+        "site_id",
+        "site_dn",
+        "object_type",
+        "id",
+        "serial_number",
+        "product_code",
+        "product_name",
+        "class",
+        "config_dn",
+        "source_file",
+        "source_path",
+    ]
+
+    existing_group_cols = [c for c in group_cols if c in df.columns]
+
     df = (
-        df.groupby(
-            [
-                "snapshot_date",
-                "site_id",
-                "object_type",
-                "id",
-                "serial_number",
-                "product_code",
-                "product_name",
-                "class",
-                "config_dn",
-                "source_file",
-            ],
-            dropna=False,
-        )
+        df.groupby(existing_group_cols, dropna=False)
         .size()
         .reset_index(name="nb_equipment")
     )
 
-    df["equipment_sort_rank"] = df["object_type"].map(EQUIPMENT_SORT_ORDER).fillna(50).astype(int)
+    df["equipment_sort_rank"] = (
+        df["object_type"]
+        .map(EQUIPMENT_SORT_ORDER)
+        .fillna(50)
+        .astype(int)
+    )
 
-    df = df.sort_values(
-        by=[
-            "snapshot_date",
-            "site_id",
-            "equipment_sort_rank",
-            "object_type",
-            "id",
-        ],
-        ascending=[True, True, True, True, True],
-    ).reset_index(drop=True)
-
-    return df[
-        [
-            "snapshot_date",
-            "site_id",
-            "object_type",
-            "id",
-            "serial_number",
-            "product_code",
-            "product_name",
-            "class",
-            "config_dn",
-            "source_file",
-            "nb_equipment",
-        ]
+    sort_cols = [
+        c for c in ["snapshot_date", "site_id", "equipment_sort_rank", "object_type", "id"]
+        if c in df.columns
     ]
+
+    if sort_cols:
+        df = df.sort_values(sort_cols).reset_index(drop=True)
+
+    final_cols = [
+        "snapshot_date",
+        "date_folder",
+        "site_id",
+        "site_dn",
+        "object_type",
+        "id",
+        "serial_number",
+        "product_code",
+        "product_name",
+        "class",
+        "config_dn",
+        "source_file",
+        "source_path",
+        "nb_equipment",
+    ]
+
+    return df[[c for c in final_cols if c in df.columns]]
 
 
 # ============================================================
-# TABLE 3 — COUNTERS / COMPTEURS
+# TABLE 3 — COMPTEURS
 # ============================================================
 
 def build_equipment_class_counter(df_equipment: pd.DataFrame) -> pd.DataFrame:
@@ -372,34 +495,51 @@ def build_equipment_class_counter(df_equipment: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = df_equipment.copy()
-    df["equipment_sort_rank"] = df["object_type"].map(EQUIPMENT_SORT_ORDER).fillna(50).astype(int)
 
-    result = (
-        df.groupby(
-            ["snapshot_date", "site_id", "object_type", "equipment_sort_rank"],
-            dropna=False,
-        )["nb_equipment"]
-        .sum()
-        .reset_index(name="equipment_count")
-        .sort_values(
-            ["snapshot_date", "site_id", "equipment_sort_rank", "object_type"],
-            ascending=[True, True, True, True],
-        )
-        .reset_index(drop=True)
+    df["equipment_sort_rank"] = (
+        df["object_type"]
+        .map(EQUIPMENT_SORT_ORDER)
+        .fillna(50)
+        .astype(int)
     )
 
-    return result[
-        [
-            "snapshot_date",
-            "site_id",
-            "object_type",
-            "equipment_count",
-        ]
+    group_cols = [
+        "snapshot_date",
+        "date_folder",
+        "site_id",
+        "object_type",
+        "equipment_sort_rank",
     ]
+
+    existing_group_cols = [c for c in group_cols if c in df.columns]
+
+    result = (
+        df.groupby(existing_group_cols, dropna=False)["nb_equipment"]
+        .sum()
+        .reset_index(name="equipment_count")
+    )
+
+    sort_cols = [
+        c for c in ["snapshot_date", "site_id", "equipment_sort_rank", "object_type"]
+        if c in result.columns
+    ]
+
+    if sort_cols:
+        result = result.sort_values(sort_cols).reset_index(drop=True)
+
+    final_cols = [
+        "snapshot_date",
+        "date_folder",
+        "site_id",
+        "object_type",
+        "equipment_count",
+    ]
+
+    return result[[c for c in final_cols if c in result.columns]]
 
 
 # ============================================================
-# TABLE 4 — DATA QUALITY / QUALITÉ DES DONNÉES
+# TABLE 4 — QUALITÉ DES DONNÉES
 # ============================================================
 
 def build_equipment_completeness_report(df_equipment: pd.DataFrame) -> pd.DataFrame:
@@ -407,6 +547,7 @@ def build_equipment_completeness_report(df_equipment: pd.DataFrame) -> pd.DataFr
         return pd.DataFrame(
             columns=[
                 "snapshot_date",
+                "date_folder",
                 "site_id",
                 "object_type",
                 "total_rows",
@@ -416,11 +557,15 @@ def build_equipment_completeness_report(df_equipment: pd.DataFrame) -> pd.DataFr
                 "product_code_missing",
                 "product_name_filled",
                 "product_name_missing",
+                "completeness_percent",
             ]
         )
 
-    return (
-        df_equipment.groupby(["snapshot_date", "site_id", "object_type"], dropna=False)
+    group_cols = ["snapshot_date", "date_folder", "site_id", "object_type"]
+    existing_group_cols = [c for c in group_cols if c in df_equipment.columns]
+
+    result = (
+        df_equipment.groupby(existing_group_cols, dropna=False)
         .agg(
             total_rows=("object_type", "size"),
             serial_filled=("serial_number", lambda s: s.notna().sum()),
@@ -431,18 +576,50 @@ def build_equipment_completeness_report(df_equipment: pd.DataFrame) -> pd.DataFr
             product_name_missing=("product_name", lambda s: s.isna().sum()),
         )
         .reset_index()
-        .sort_values(["snapshot_date", "site_id", "object_type"])
-        .reset_index(drop=True)
     )
+
+    filled = (
+        result["serial_filled"]
+        + result["product_code_filled"]
+        + result["product_name_filled"]
+    )
+
+    total = result["total_rows"] * 3
+
+    result["completeness_percent"] = (
+        ((filled / total) * 100)
+        .round(2)
+        .fillna(0)
+    )
+
+    sort_cols = [
+        c for c in ["snapshot_date", "site_id", "object_type"]
+        if c in result.columns
+    ]
+
+    if sort_cols:
+        result = result.sort_values(sort_cols).reset_index(drop=True)
+
+    return result
+
+
 # ============================================================
-# XML PARSER PRINCIPAL
+# PARSER XML PRINCIPAL
 # ============================================================
 
-def parse_xml_file(xml_file: str) -> Dict[str, Any]:
+def parse_xml_file(
+    xml_file: str | Path,
+    forced_snapshot_date: Optional[str] = None,
+    date_folder: Optional[str] = None,
+    source_root: Optional[str | Path] = None,
+) -> Dict[str, Any]:
     xml_path = Path(xml_file)
+    source_root_path = Path(source_root) if source_root else None
 
-    snapshot_date = None
+    xml_snapshot_date = None
+
     site_id = None
+    site_dn = None
     site_name = None
     blocking_state = None
     sw_version = None
@@ -469,8 +646,8 @@ def parse_xml_file(xml_file: str) -> Dict[str, Any]:
     for _, elem in context:
         tag = strip_ns(elem.tag)
 
-        if tag == "log" and snapshot_date is None:
-            snapshot_date = elem.attrib.get("dateTime")
+        if tag == "log" and xml_snapshot_date is None:
+            xml_snapshot_date = normalize_date(elem.attrib.get("dateTime"))
 
         elif tag == "managedObject":
             mo_class = elem.attrib.get("class", "")
@@ -478,8 +655,12 @@ def parse_xml_file(xml_file: str) -> Dict[str, Any]:
             version = elem.attrib.get("version", "")
             params = get_params(elem)
 
+            current_site_id = extract_mrbts_id(dist_name)
+            current_site_dn = extract_mrbts_dn(dist_name)
+
             if mo_class == "com.nokia.srbts:MRBTS":
-                site_id = dist_name
+                site_id = current_site_id
+                site_dn = dist_name
                 site_name = params.get("btsName")
                 blocking_state = params.get("blockingState")
                 sw_version = version
@@ -514,11 +695,18 @@ def parse_xml_file(xml_file: str) -> Dict[str, Any]:
                 config_dn = first(params, ["configDN"]) or dist_name
                 fields = extract_equipment_fields(params)
 
+                row_site_id = site_id or current_site_id
+                row_site_dn = site_dn or current_site_dn
+
                 equipment_rows.append(
                     {
                         "source_file": xml_path.name,
-                        "snapshot_date": snapshot_date,
-                        "site_id": site_id,
+                        "source_path": path_relative_to(xml_path, source_root_path),
+                        "date_folder": date_folder,
+                        "snapshot_date": normalize_date(forced_snapshot_date) or xml_snapshot_date,
+                        "xml_snapshot_date": xml_snapshot_date,
+                        "site_id": row_site_id,
+                        "site_dn": row_site_dn,
                         "class": mo_class,
                         "config_dn": config_dn,
                         "id": extract_id(config_dn),
@@ -543,10 +731,16 @@ def parse_xml_file(xml_file: str) -> Dict[str, Any]:
         ip_candidates[0][1] if ip_candidates else None
     )
 
+    final_snapshot_date = normalize_date(forced_snapshot_date) or xml_snapshot_date
+
     site_row = build_site_row(
         xml_path=xml_path,
-        snapshot_date=snapshot_date,
+        source_root=source_root_path,
+        date_folder=date_folder,
+        snapshot_date=final_snapshot_date,
+        xml_snapshot_date=xml_snapshot_date,
         site_id=site_id,
+        site_dn=site_dn,
         site_name=site_name,
         blocking_state=blocking_state,
         sw_version=sw_version,
@@ -566,36 +760,137 @@ def parse_xml_file(xml_file: str) -> Dict[str, Any]:
 
 
 # ============================================================
-# PARSING PARALLÈLE
+# PARSING PARALLÈLE DE TOUT LE DOSSIER
 # ============================================================
 
-def _worker(xml_file: str) -> Dict[str, Any]:
-    return parse_xml_file(xml_file)
+def _worker(args: Tuple[str, Optional[str], Optional[str], Optional[str]]) -> Dict[str, Any]:
+    xml_file, forced_snapshot_date, date_folder, source_root = args
+
+    return parse_xml_file(
+        xml_file=xml_file,
+        forced_snapshot_date=forced_snapshot_date,
+        date_folder=date_folder,
+        source_root=source_root,
+    )
 
 
 def parse_folder_parallel(
-    xml_folder: str,
+    xml_folder: str | Path,
     max_workers: Optional[int] = None,
+    forced_snapshot_date: Optional[str] = None,
+    date_folder: Optional[str] = None,
+    recursive: bool = True,
+    source_root: Optional[str | Path] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    files = list_xml_files(xml_folder)
+    """
+    Parse tous les XML disponibles dans un dossier.
+
+    Paramètres importants:
+        xml_folder:
+            Dossier à parser.
+
+        recursive=True:
+            Parse tous les fichiers:
+                xml_folder/**/*.xml
+
+        forced_snapshot_date:
+            Date imposée depuis le grand dossier DATA.XML/2025.02.13.
+            C'est cette date qui sera utilisée par le dashboard et le delta.
+
+        date_folder:
+            Même logique que forced_snapshot_date, gardée pour audit.
+
+        max_workers:
+            Nombre de processus parallèles.
+            Ce n'est PAS une limite de fichiers.
+
+    Retour:
+        df_sites, df_equipment_raw
+    """
+    files = list_xml_files(xml_folder, recursive=recursive)
 
     if max_workers is None:
         max_workers = max(1, (os.cpu_count() or 4) - 1)
 
+    source_root_str = str(source_root or xml_folder)
+
     site_rows: List[Dict[str, Any]] = []
     equipment_rows: List[Dict[str, Any]] = []
 
+    tasks = [
+        (
+            str(xml_file),
+            forced_snapshot_date,
+            date_folder,
+            source_root_str,
+        )
+        for xml_file in files
+    ]
+
+    total_files = len(tasks)
+
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        for i, result in enumerate(
-            executor.map(_worker, [str(f) for f in files]),
-            start=1,
-        ):
+        for i, result in enumerate(executor.map(_worker, tasks), start=1):
             if result.get("site"):
                 site_rows.append(result["site"])
 
             equipment_rows.extend(result.get("equipment", []))
 
-            if i % 50 == 0 or i == len(files):
-                print(f"[PARSE] {i}/{len(files)} fichiers traités")
+            if i % 50 == 0 or i == total_files:
+                print(f"[PARSE] {i}/{total_files} fichiers XML traités")
 
     return pd.DataFrame(site_rows), pd.DataFrame(equipment_rows)
+
+
+# ============================================================
+# TEST LOCAL OPTIONNEL
+# ============================================================
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Parser Nokia XML — parse tous les XML d'un dossier."
+    )
+
+    parser.add_argument(
+        "xml_folder",
+        type=Path,
+        help="Dossier contenant les XML à parser.",
+    )
+
+    parser.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Date forcée, exemple: 2025-02-13.",
+    )
+
+    parser.add_argument(
+        "--no-recursive",
+        action="store_true",
+        help="Désactive la recherche récursive.",
+    )
+
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Nombre de workers parallèles.",
+    )
+
+    args = parser.parse_args()
+
+    sites, equipment = parse_folder_parallel(
+        xml_folder=args.xml_folder,
+        forced_snapshot_date=args.date,
+        date_folder=args.date,
+        recursive=not args.no_recursive,
+        source_root=args.xml_folder,
+        max_workers=args.max_workers,
+    )
+
+    print("=" * 80)
+    print(f"Sites: {len(sites)}")
+    print(f"Équipements bruts: {len(equipment)}")
+    print("=" * 80)
