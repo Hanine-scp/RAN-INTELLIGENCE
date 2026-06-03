@@ -7,6 +7,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import plotly.express as px
 import streamlit as st
 
+st.set_page_config(page_title="Delta — RAN Intelligence", page_icon="📡", layout="wide")
+
 from app.components.navbar import hide_default_sidebar_nav, render_navbar
 from app.components.sidebar_filters import render_sidebar_filters
 from src.services.data_service import get_delta_metrics, get_site_changes
