@@ -1,288 +1,321 @@
+import sys
 from pathlib import Path
 
-import duckdb
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
+
+from app.components.navbar import hide_default_sidebar_nav, render_navbar
+from app.components.sidebar_filters import render_sidebar_filters
+from src.services.data_service import query, SITES_PATH, EQUIPMENT_PATH
+
 
 st.set_page_config(
     page_title="RAN Intelligence Platform",
     page_icon="📡",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
-SITES_PATH = "data/lake/sites/*.parquet"
-EQUIPMENT_PATH = "data/lake/equipment/*.parquet"
-DELTA_PATH = "data/lake/delta/delta_metrics.parquet"
-SITE_CHANGES_PATH = "data/lake/site_changes/site_changes.parquet"
+hide_default_sidebar_nav()
+render_navbar("Accueil")
 
 st.markdown("""
 <style>
-.stApp { background: #ffffff; }
-.block-container { padding-top: 1rem; max-width: 100%; }
-h1, h2, h3 { color: #111827; }
-section[data-testid="stSidebar"] {
-    background: #ffffff;
-    border-right: 1px solid #e5e7eb;
+.block-container {
+    padding-top: 1rem;
+    padding-left: 2.5rem;
+    padding-right: 2.5rem;
 }
-.metric-card {
+.hero {
+    background: linear-gradient(135deg, #ffffff 0%, #fff5f5 100%);
+    border: 1px solid #e5e7eb;
+    border-radius: 26px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    box-shadow: 0 14px 38px rgba(17,24,39,0.06);
+}
+.hero-title {
+    font-size: 42px;
+    font-weight: 950;
+    color: #111827;
+}
+.hero-subtitle {
+    color: #6b7280;
+    font-size: 15px;
+    margin-top: 8px;
+}
+.badge {
+    display: inline-block;
+    background: #fff1f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    padding: 7px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    margin-top: 14px;
+}
+.kpi-card {
     background: #ffffff;
     border: 1px solid #e5e7eb;
-    border-left: 5px solid #b91c1c;
-    border-radius: 16px;
-    padding: 18px;
-    box-shadow: 0 8px 22px rgba(0,0,0,0.04);
+    border-left: 6px solid #b91c1c;
+    border-radius: 20px;
+    padding: 20px;
+    box-shadow: 0 12px 30px rgba(17,24,39,0.05);
 }
-.card-title {
+.kpi-label {
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 850;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+}
+.kpi-value {
+    color: #111827;
+    font-size: 34px;
+    font-weight: 950;
+    margin-top: 12px;
+}
+.kpi-sub {
     color: #6b7280;
     font-size: 13px;
-    font-weight: 700;
+    margin-top: 8px;
 }
-.card-value {
-    color: #111827;
-    font-size: 32px;
+.section-title {
+    font-size: 21px;
     font-weight: 900;
+    color: #111827;
+    margin: 18px 0 12px 0;
 }
 </style>
 """, unsafe_allow_html=True)
 
 
-def lake_ready() -> bool:
-    return Path("data/lake/sites").exists() and any(Path("data/lake/sites").glob("*.parquet"))
+def sql_in(values):
+    if not values:
+        return "('')"
+    return "(" + ", ".join("'" + str(v).replace("'", "''") + "'" for v in values) + ")"
 
 
-@st.cache_data(show_spinner=False)
-def query(sql: str) -> pd.DataFrame:
-    return duckdb.query(sql).to_df()
-
-
-def metric_card(title: str, value: str):
+def kpi(label, value, sub):
     st.markdown(
         f"""
-        <div class="metric-card">
-            <div class="card-title">{title}</div>
-            <div class="card-value">{value}</div>
+        <div class="kpi-card">
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
+            <div class="kpi-sub">{sub}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-TEXT = {
-    "Français": {
-        "title": "RAN Intelligence Platform",
-        "subtitle": "Plateforme intelligente de suivi RAN, inventaire, delta et prédiction",
-        "overview": "Vue générale",
-        "sites": "Sites",
-        "inventory": "Inventaire",
-        "delta": "Delta",
-        "quality": "Qualité",
-        "total_sites": "Sites",
-        "active_sites": "Sites actifs",
-        "blocked_sites": "Sites bloqués",
-        "equipment": "Équipements",
-        "date": "Date",
-    },
-    "English": {
-        "title": "RAN Intelligence Platform",
-        "subtitle": "Intelligent RAN monitoring, inventory, delta and prediction platform",
-        "overview": "Overview",
-        "sites": "Sites",
-        "inventory": "Inventory",
-        "delta": "Delta",
-        "quality": "Quality",
-        "total_sites": "Sites",
-        "active_sites": "Active sites",
-        "blocked_sites": "Blocked sites",
-        "equipment": "Equipment",
-        "date": "Date",
-    },
-}
+filters = render_sidebar_filters()
 
+selected_dates = filters["effective_dates"] or filters["selected_dates"]
+selected_files = filters["selected_files"]
+selected_sites = filters["selected_sites"]
 
-with st.sidebar:
-    st.markdown("## RAN Intelligence Platform")
-    lang = st.selectbox("Langue / Language", ["Français", "English"])
-    t = TEXT[lang]
-
-    page = st.radio(
-        "Navigation",
-        [t["overview"], t["sites"], t["inventory"], t["delta"], t["quality"]],
-    )
-
-if not lake_ready():
-    st.error("Aucune donnée trouvée. Lance d’abord le pipeline Nokia.")
-    st.code(
-        'python pipeline\\main_pipeline.py --root . --source-root "C:\\Users\\espace info\\OneDrive - ESPRIT\\Bureau\\DATA.XML" --max-workers 2 --no-recursive-xml',
-        language="powershell",
-    )
+if not selected_dates:
+    st.warning("Veuillez sélectionner au moins une date.")
     st.stop()
 
-st.markdown(f"<h1>{t['title']}</h1>", unsafe_allow_html=True)
-st.caption(t["subtitle"])
+selected_dates = sorted(selected_dates)
+latest_date = selected_dates[-1]
+oldest_date = selected_dates[0]
 
-dates = query(f"""
-SELECT DISTINCT CAST(snapshot_date AS VARCHAR) AS snapshot_date
-FROM read_parquet('{SITES_PATH}')
-ORDER BY snapshot_date DESC
-""")["snapshot_date"].tolist()
+site_where = f"CAST(snapshot_date AS VARCHAR) IN {sql_in(selected_dates)}"
+equipment_where = f"CAST(snapshot_date AS VARCHAR) IN {sql_in(selected_dates)}"
 
-selected_date = st.sidebar.selectbox(t["date"], dates)
+if selected_files:
+    site_where += f" AND CAST(source_file AS VARCHAR) IN {sql_in(selected_files)}"
+    equipment_where += f" AND CAST(source_file AS VARCHAR) IN {sql_in(selected_files)}"
+
+if selected_sites:
+    site_where += f" AND CAST(site_id AS VARCHAR) IN {sql_in(selected_sites)}"
+    equipment_where += f" AND CAST(site_id AS VARCHAR) IN {sql_in(selected_sites)}"
+
+latest_site_where = site_where + f" AND CAST(snapshot_date AS VARCHAR) = '{latest_date}'"
+latest_equipment_where = equipment_where + f" AND CAST(snapshot_date AS VARCHAR) = '{latest_date}'"
+
+st.markdown(
+    f"""
+    <div class="hero">
+        <div class="hero-title">RAN Intelligence Platform</div>
+        <div class="hero-subtitle">
+            Plateforme C2 intelligente dédiée à la supervision consolidée du réseau RAN Nokia.
+            Elle centralise les snapshots XML, analyse l’état des sites, l’inventaire hardware,
+            les deltas entre dates, la qualité des données et prépare les indicateurs prédictifs
+            pour le dimensionnement des spares et l’aide à la décision opérationnelle.
+        </div>
+        <div class="badge">
+            Analyse active : {oldest_date} → {latest_date} · {len(selected_dates)} snapshot(s)
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 site_kpi = query(f"""
 SELECT
-    COUNT(DISTINCT site_id) AS total_sites,
-    COALESCE(SUM(CASE WHEN site_state = 'active' THEN 1 ELSE 0 END), 0) AS active_sites,
-    COALESCE(SUM(CASE WHEN site_state = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked_sites,
+    COUNT(*) AS total_sites,
+    COALESCE(SUM(CASE WHEN LOWER(site_state) = 'active' THEN 1 ELSE 0 END), 0) AS active_sites,
+    COALESCE(SUM(CASE WHEN LOWER(site_state) = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked_sites,
     COALESCE(SUM(nb_cells_2g), 0) AS cells_2g,
     COALESCE(SUM(nb_cells_3g), 0) AS cells_3g,
     COALESCE(SUM(nb_cells_lte_4g), 0) AS cells_4g,
     COALESCE(SUM(nb_cells_5g), 0) AS cells_5g
 FROM read_parquet('{SITES_PATH}')
-WHERE CAST(snapshot_date AS VARCHAR) = '{selected_date}'
+WHERE {site_where}
 """).iloc[0]
 
-equip_kpi = query(f"""
+equipment_kpi = query(f"""
 SELECT COALESCE(SUM(nb_equipment), 0) AS total_equipment
 FROM read_parquet('{EQUIPMENT_PATH}')
-WHERE CAST(snapshot_date AS VARCHAR) = '{selected_date}'
+WHERE {equipment_where}
 """).iloc[0]
 
-if page == t["overview"]:
-    c1, c2, c3, c4 = st.columns(4)
+availability = round(
+    int(site_kpi["active_sites"]) / int(site_kpi["total_sites"]) * 100,
+    2,
+) if int(site_kpi["total_sites"]) else 0
 
-    with c1:
-        metric_card(t["total_sites"], f"{int(site_kpi['total_sites']):,}")
-    with c2:
-        metric_card(t["active_sites"], f"{int(site_kpi['active_sites']):,}")
-    with c3:
-        metric_card(t["blocked_sites"], f"{int(site_kpi['blocked_sites']):,}")
-    with c4:
-        metric_card(t["equipment"], f"{int(equip_kpi['total_equipment']):,}")
+c1, c2, c3, c4, c5 = st.columns(5)
 
-    st.divider()
+with c1:
+    kpi("Sites", f"{int(site_kpi['total_sites']):,}", f"Dernier snapshot {latest_date}")
+with c2:
+    kpi("Sites actifs", f"{int(site_kpi['active_sites']):,}", "RAN opérationnel")
+with c3:
+    kpi("Sites bloqués", f"{int(site_kpi['blocked_sites']):,}", "Sites sous impact")
+with c4:
+    kpi("Équipements", f"{int(equipment_kpi['total_equipment']):,}", "Modules installés")
+with c5:
+    kpi("Disponibilité", f"{availability}%", "Taux opérationnel")
 
-    tech_df = pd.DataFrame({
-        "Technologie": ["2G", "3G", "4G", "5G"],
-        "Cellules": [
-            int(site_kpi["cells_2g"]),
-            int(site_kpi["cells_3g"]),
-            int(site_kpi["cells_4g"]),
-            int(site_kpi["cells_5g"]),
-        ],
-    })
+st.divider()
 
-    fig = px.bar(
-        tech_df,
-        x="Technologie",
-        y="Cellules",
-        title="Répartition des cellules par technologie",
-    )
+summary = query(f"""
+SELECT
+    CAST(snapshot_date AS VARCHAR) AS snapshot_date,
+    COUNT(DISTINCT site_id) AS nb_sites,
+    COALESCE(SUM(CASE WHEN LOWER(site_state) = 'active' THEN 1 ELSE 0 END), 0) AS active_sites,
+    COALESCE(SUM(CASE WHEN LOWER(site_state) = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked_sites,
+    COALESCE(SUM(nb_cells_2g), 0) AS cells_2g,
+    COALESCE(SUM(nb_cells_3g), 0) AS cells_3g,
+    COALESCE(SUM(nb_cells_lte_4g), 0) AS cells_4g,
+    COALESCE(SUM(nb_cells_5g), 0) AS cells_5g
+FROM read_parquet('{SITES_PATH}')
+WHERE {site_where}
+GROUP BY snapshot_date
+ORDER BY snapshot_date
+""")
+
+equipment_summary = query(f"""
+SELECT
+    CAST(snapshot_date AS VARCHAR) AS snapshot_date,
+    object_type,
+    COALESCE(SUM(nb_equipment), 0) AS equipment_count
+FROM read_parquet('{EQUIPMENT_PATH}')
+WHERE {equipment_where}
+GROUP BY snapshot_date, object_type
+ORDER BY snapshot_date, object_type
+""")
+
+left, right = st.columns(2)
+
+with left:
+    st.markdown('<div class="section-title">Évolution des sites</div>', unsafe_allow_html=True)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=summary["snapshot_date"],
+        y=summary["nb_sites"],
+        mode="lines+markers",
+        line=dict(color="#b91c1c", width=3),
+        marker=dict(size=9),
+        name="Sites",
+    ))
+    fig.update_layout(template="plotly_white", height=350, margin=dict(l=20, r=20, t=30, b=20))
     st.plotly_chart(fig, width="stretch")
 
-elif page == t["sites"]:
-    search = st.text_input("Recherche site / IP / version SW")
+with right:
+    st.markdown('<div class="section-title">Sites actifs vs bloqués</div>', unsafe_allow_html=True)
+    state_df = summary.melt(
+        id_vars=["snapshot_date"],
+        value_vars=["active_sites", "blocked_sites"],
+        var_name="État",
+        value_name="Sites",
+    )
+    state_df["État"] = state_df["État"].replace({
+        "active_sites": "Actifs",
+        "blocked_sites": "Bloqués",
+    })
+    fig = px.bar(
+        state_df,
+        x="snapshot_date",
+        y="Sites",
+        color="État",
+        barmode="group",
+        color_discrete_map={"Actifs": "#b91c1c", "Bloqués": "#fca5a5"},
+    )
+    fig.update_layout(template="plotly_white", height=350, margin=dict(l=20, r=20, t=30, b=20))
+    st.plotly_chart(fig, width="stretch")
 
-    where = f"CAST(snapshot_date AS VARCHAR) = '{selected_date}'"
+st.markdown('<div class="section-title">Répartition des cellules par technologie</div>', unsafe_allow_html=True)
 
-    if search:
-        q = search.replace("'", "''").lower()
-        where += f"""
-        AND (
-            LOWER(CAST(site_id AS VARCHAR)) LIKE '%{q}%'
-            OR LOWER(CAST(site_name AS VARCHAR)) LIKE '%{q}%'
-            OR LOWER(CAST(ip_address AS VARCHAR)) LIKE '%{q}%'
-            OR LOWER(CAST(sw_version AS VARCHAR)) LIKE '%{q}%'
-        )
-        """
+cells_df = summary.melt(
+    id_vars=["snapshot_date"],
+    value_vars=["cells_2g", "cells_3g", "cells_4g", "cells_5g"],
+    var_name="Technologie",
+    value_name="Cellules",
+)
 
-    df_sites = query(f"""
-    SELECT
-        site_id,
-        site_name,
-        site_state,
-        ip_address,
-        sw_version,
-        nb_cells,
-        technologies,
-        source_file
-    FROM read_parquet('{SITES_PATH}')
-    WHERE {where}
-    ORDER BY site_id
-    """)
+cells_df["Technologie"] = cells_df["Technologie"].replace({
+    "cells_2g": "2G",
+    "cells_3g": "3G",
+    "cells_4g": "4G",
+    "cells_5g": "5G",
+})
 
-    st.dataframe(df_sites, width="stretch", hide_index=True)
+fig_cells = px.bar(
+    cells_df,
+    x="snapshot_date",
+    y="Cellules",
+    color="Technologie",
+    barmode="group",
+    color_discrete_map={
+        "2G": "#7f1d1d",
+        "3G": "#991b1b",
+        "4G": "#b91c1c",
+        "5G": "#fca5a5",
+    },
+)
 
-elif page == t["inventory"]:
-    object_types = query(f"""
-    SELECT DISTINCT object_type
-    FROM read_parquet('{EQUIPMENT_PATH}')
-    WHERE CAST(snapshot_date AS VARCHAR) = '{selected_date}'
-    ORDER BY object_type
-    """)["object_type"].tolist()
+fig_cells.update_layout(template="plotly_white", height=400, margin=dict(l=20, r=20, t=30, b=20))
+st.plotly_chart(fig_cells, width="stretch")
 
-    selected_objects = st.multiselect("Types équipements", object_types)
+st.markdown('<div class="section-title">Distribution des équipements</div>', unsafe_allow_html=True)
 
-    where = f"CAST(snapshot_date AS VARCHAR) = '{selected_date}'"
+fig_eq = px.bar(
+    equipment_summary,
+    x="snapshot_date",
+    y="equipment_count",
+    color="object_type",
+    barmode="group",
+)
 
-    if selected_objects:
-        values = ", ".join("'" + x.replace("'", "''") + "'" for x in selected_objects)
-        where += f" AND object_type IN ({values})"
+fig_eq.update_layout(template="plotly_white", height=430, margin=dict(l=20, r=20, t=30, b=20))
+st.plotly_chart(fig_eq, width="stretch")
 
-    df_inv = query(f"""
-    SELECT
-        site_id,
-        object_type,
-        id,
-        serial_number,
-        product_code,
-        product_name,
-        nb_equipment,
-        source_file
-    FROM read_parquet('{EQUIPMENT_PATH}')
-    WHERE {where}
-    ORDER BY site_id, object_type, id
-    LIMIT 5000
-    """)
+st.markdown('<div class="section-title">Synthèse opérationnelle</div>', unsafe_allow_html=True)
 
-    st.dataframe(df_inv, width="stretch", hide_index=True)
+summary_display = summary.copy()
+summary_display["availability_percent"] = (
+    summary_display["active_sites"] / summary_display["nb_sites"] * 100
+).round(2)
 
-elif page == t["delta"]:
-    if not Path("data/lake/delta/delta_metrics.parquet").exists():
-        st.warning("Aucun delta disponible.")
-    else:
-        df_delta = query(f"""
-        SELECT *
-        FROM read_parquet('{DELTA_PATH}')
-        ORDER BY metric
-        """)
-
-        st.dataframe(df_delta, width="stretch", hide_index=True)
-
-    if Path("data/lake/site_changes/site_changes.parquet").exists():
-        st.subheader("Sites ajoutés / supprimés")
-        df_changes = query(f"""
-        SELECT *
-        FROM read_parquet('{SITE_CHANGES_PATH}')
-        ORDER BY change_type, site_id
-        """)
-        st.dataframe(df_changes, width="stretch", hide_index=True)
-
-elif page == t["quality"]:
-    df_quality = query("""
-    SELECT
-        snapshot_date,
-        site_id,
-        object_type,
-        total_rows,
-        serial_missing,
-        product_code_missing,
-        product_name_missing,
-        completeness_percent
-    FROM read_parquet('data/lake/completeness/*.parquet')
-    ORDER BY completeness_percent ASC
-    LIMIT 5000
-    """)
-
-    st.dataframe(df_quality, width="stretch", hide_index=True)
+st.dataframe(summary_display, width="stretch", hide_index=True)
