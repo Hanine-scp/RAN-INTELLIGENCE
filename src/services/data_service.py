@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import duckdb
 import pandas as pd
 
@@ -15,7 +16,8 @@ def lake_ready() -> bool:
 
 
 def query(sql: str) -> pd.DataFrame:
-    return duckdb.query(sql).to_df()
+    with duckdb.connect(database=":memory:") as con:
+        return con.execute(sql).fetchdf()
 
 
 def get_snapshot_dates() -> list[str]:
@@ -31,8 +33,8 @@ def get_site_kpis(snapshot_date: str) -> pd.Series:
     return query(f"""
         SELECT
             COUNT(DISTINCT site_id) AS total_sites,
-            COALESCE(SUM(CASE WHEN site_state = 'active' THEN 1 ELSE 0 END), 0) AS active_sites,
-            COALESCE(SUM(CASE WHEN site_state = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked_sites,
+            COALESCE(SUM(CASE WHEN LOWER(site_state) = 'active' THEN 1 ELSE 0 END), 0) AS active_sites,
+            COALESCE(SUM(CASE WHEN LOWER(site_state) = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked_sites,
             COALESCE(SUM(nb_cells_2g), 0) AS cells_2g,
             COALESCE(SUM(nb_cells_3g), 0) AS cells_3g,
             COALESCE(SUM(nb_cells_lte_4g), 0) AS cells_4g,
@@ -80,6 +82,16 @@ def get_sites(snapshot_date: str, search: str = "") -> pd.DataFrame:
     """)
 
 
+def get_object_types(snapshot_date: str) -> list[str]:
+    df = query(f"""
+        SELECT DISTINCT object_type
+        FROM read_parquet('{EQUIPMENT_PATH}')
+        WHERE CAST(snapshot_date AS VARCHAR) = '{snapshot_date}'
+        ORDER BY object_type
+    """)
+    return df["object_type"].tolist()
+
+
 def get_equipment(snapshot_date: str, object_types: list[str] | None = None) -> pd.DataFrame:
     where = f"CAST(snapshot_date AS VARCHAR) = '{snapshot_date}'"
 
@@ -102,16 +114,6 @@ def get_equipment(snapshot_date: str, object_types: list[str] | None = None) -> 
         ORDER BY site_id, object_type, id
         LIMIT 5000
     """)
-
-
-def get_object_types(snapshot_date: str) -> list[str]:
-    df = query(f"""
-        SELECT DISTINCT object_type
-        FROM read_parquet('{EQUIPMENT_PATH}')
-        WHERE CAST(snapshot_date AS VARCHAR) = '{snapshot_date}'
-        ORDER BY object_type
-    """)
-    return df["object_type"].tolist()
 
 
 def get_delta_metrics() -> pd.DataFrame:
