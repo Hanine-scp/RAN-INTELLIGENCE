@@ -1,18 +1,31 @@
 import sys
 from pathlib import Path
 
-import streamlit as st
-import plotly.express as px
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import plotly.express as px
+import streamlit as st
+
+from app.components.navbar import hide_default_sidebar_nav, render_navbar
+from app.components.sidebar_filters import render_sidebar_filters, sql_in
 from src.services.data_service import query, EQUIPMENT_PATH
+from app.utils.styles import inject_global_styles
+from app.utils.i18n import _
 
-st.set_page_config(page_title="Prediction", page_icon="🔮", layout="wide")
+inject_global_styles()
+hide_default_sidebar_nav()
+render_navbar("Prediction")
 
-st.title("Prediction & Spare Forecasting")
-st.caption("Préparation de la prédiction des besoins en pièces de rechange")
+filters = render_sidebar_filters()
+effective_dates = filters["effective_dates"]
+
+if not effective_dates:
+    st.warning(_("warning_dates"))
+    st.stop()
+
+st.markdown(f'<div class="hero-title">{_("page_pred_title")}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="hero-subtitle" style="margin-bottom: 24px;">{_("page_pred_sub")}</div>', unsafe_allow_html=True)
 
 df = query(f"""
 SELECT
@@ -20,6 +33,7 @@ SELECT
     SUM(nb_equipment) AS installed_base,
     COUNT(DISTINCT serial_number) AS unique_serials
 FROM read_parquet('{EQUIPMENT_PATH}')
+WHERE CAST(snapshot_date AS VARCHAR) IN {sql_in(effective_dates)}
 GROUP BY object_type
 ORDER BY installed_base DESC
 """)
@@ -27,15 +41,20 @@ ORDER BY installed_base DESC
 df["risk_score"] = (df["installed_base"] / df["installed_base"].max() * 100).round(2)
 df["estimated_spares_30d"] = (df["installed_base"] * 0.02).round(0).astype(int)
 
-st.subheader("Score de risque par type d’équipement")
+st.markdown('<div class="section-title">Score de risque par type d’équipement</div>', unsafe_allow_html=True)
 
-fig = px.bar(df, x="object_type", y="risk_score", title="Risk Score")
+st.markdown('<div class="content-card">', unsafe_allow_html=True)
+fig = px.bar(df, x="object_type", y="risk_score", title="Risk Score", color_discrete_sequence=["#eb1019"])
+fig.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=30, b=20))
 st.plotly_chart(fig, width="stretch")
+st.markdown('</div>', unsafe_allow_html=True)
 
-st.subheader("Dimensionnement prévisionnel des spares")
+st.markdown('<div class="section-title">Dimensionnement prévisionnel des spares</div>', unsafe_allow_html=True)
 
+st.markdown('<div class="content-card">', unsafe_allow_html=True)
 st.dataframe(
     df[["object_type", "installed_base", "unique_serials", "risk_score", "estimated_spares_30d"]],
     width="stretch",
     hide_index=True,
 )
+st.markdown('</div>', unsafe_allow_html=True)

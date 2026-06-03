@@ -10,8 +10,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.components.navbar import hide_default_sidebar_nav, render_navbar
-from app.components.sidebar_filters import render_sidebar_filters
+from app.components.sidebar_filters import render_sidebar_filters, sql_in
 from src.services.data_service import query, SITES_PATH, EQUIPMENT_PATH
+from app.utils.image_utils import get_base64_image
+from app.utils.styles import inject_global_styles, kpi
+from app.utils.i18n import _
 
 
 st.set_page_config(
@@ -20,98 +23,11 @@ st.set_page_config(
     layout="wide",
 )
 
+inject_global_styles()
 hide_default_sidebar_nav()
 render_navbar("Accueil")
 
-st.markdown("""
-<style>
-.block-container {
-    padding-top: 1rem;
-    padding-left: 2.5rem;
-    padding-right: 2.5rem;
-}
-.hero {
-    background: linear-gradient(135deg, #ffffff 0%, #fff5f5 100%);
-    border: 1px solid #e5e7eb;
-    border-radius: 26px;
-    padding: 28px 32px;
-    margin-bottom: 24px;
-    box-shadow: 0 14px 38px rgba(17,24,39,0.06);
-}
-.hero-title {
-    font-size: 42px;
-    font-weight: 950;
-    color: #111827;
-}
-.hero-subtitle {
-    color: #6b7280;
-    font-size: 15px;
-    margin-top: 8px;
-}
-.badge {
-    display: inline-block;
-    background: #fff1f2;
-    color: #b91c1c;
-    border: 1px solid #fecaca;
-    padding: 7px 12px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 800;
-    margin-top: 14px;
-}
-.kpi-card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-left: 6px solid #b91c1c;
-    border-radius: 20px;
-    padding: 20px;
-    box-shadow: 0 12px 30px rgba(17,24,39,0.05);
-}
-.kpi-label {
-    color: #6b7280;
-    font-size: 12px;
-    font-weight: 850;
-    text-transform: uppercase;
-    letter-spacing: .8px;
-}
-.kpi-value {
-    color: #111827;
-    font-size: 34px;
-    font-weight: 950;
-    margin-top: 12px;
-}
-.kpi-sub {
-    color: #6b7280;
-    font-size: 13px;
-    margin-top: 8px;
-}
-.section-title {
-    font-size: 21px;
-    font-weight: 900;
-    color: #111827;
-    margin: 18px 0 12px 0;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-def sql_in(values):
-    if not values:
-        return "('')"
-    return "(" + ", ".join("'" + str(v).replace("'", "''") + "'" for v in values) + ")"
-
-
-def kpi(label, value, sub):
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">{label}</div>
-            <div class="kpi-value">{value}</div>
-            <div class="kpi-sub">{sub}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Styles and kpi function are now imported from app.utils.styles
 
 
 filters = render_sidebar_filters()
@@ -121,7 +37,7 @@ selected_files = filters["selected_files"]
 selected_sites = filters["selected_sites"]
 
 if not selected_dates:
-    st.warning("Veuillez sélectionner au moins une date.")
+    st.warning(_("warning_dates"))
     st.stop()
 
 selected_dates = sorted(selected_dates)
@@ -142,18 +58,19 @@ if selected_sites:
 latest_site_where = site_where + f" AND CAST(snapshot_date AS VARCHAR) = '{latest_date}'"
 latest_equipment_where = equipment_where + f" AND CAST(snapshot_date AS VARCHAR) = '{latest_date}'"
 
+logo_base64 = get_base64_image("c:/projects/RAN-INTELLIGENCE/Ooredoo_logo_2017.png")
+logo_html = f'<div class="hero-logo-container"><img src="data:image/png;base64,{logo_base64}" alt="Ooredoo Logo"></div>' if logo_base64 else ''
+
 st.markdown(
     f"""
     <div class="hero">
-        <div class="hero-title">RAN Intelligence Platform</div>
+        {logo_html}
+        <div class="hero-title">{_("hero_title")}</div>
         <div class="hero-subtitle">
-            Plateforme C2 intelligente dédiée à la supervision consolidée du réseau RAN Nokia.
-            Elle centralise les snapshots XML, analyse l’état des sites, l’inventaire hardware,
-            les deltas entre dates, la qualité des données et prépare les indicateurs prédictifs
-            pour le dimensionnement des spares et l’aide à la décision opérationnelle.
+            {_("hero_sub")}
         </div>
         <div class="badge">
-            Analyse active : {oldest_date} → {latest_date} · {len(selected_dates)} snapshot(s)
+            {_("hero_badge_prefix")} {oldest_date} → {latest_date} · {len(selected_dates)} {_("hero_badge_suffix")}
         </div>
     </div>
     """,
@@ -162,7 +79,7 @@ st.markdown(
 
 site_kpi = query(f"""
 SELECT
-    COUNT(*) AS total_sites,
+    COUNT(DISTINCT site_id) AS total_sites,
     COALESCE(SUM(CASE WHEN LOWER(site_state) = 'active' THEN 1 ELSE 0 END), 0) AS active_sites,
     COALESCE(SUM(CASE WHEN LOWER(site_state) = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked_sites,
     COALESCE(SUM(nb_cells_2g), 0) AS cells_2g,
@@ -170,13 +87,13 @@ SELECT
     COALESCE(SUM(nb_cells_lte_4g), 0) AS cells_4g,
     COALESCE(SUM(nb_cells_5g), 0) AS cells_5g
 FROM read_parquet('{SITES_PATH}')
-WHERE {site_where}
+WHERE {latest_site_where}
 """).iloc[0]
 
 equipment_kpi = query(f"""
 SELECT COALESCE(SUM(nb_equipment), 0) AS total_equipment
 FROM read_parquet('{EQUIPMENT_PATH}')
-WHERE {equipment_where}
+WHERE {latest_equipment_where}
 """).iloc[0]
 
 availability = round(
@@ -187,15 +104,15 @@ availability = round(
 c1, c2, c3, c4, c5 = st.columns(5)
 
 with c1:
-    kpi("Sites", f"{int(site_kpi['total_sites']):,}", f"Dernier snapshot {latest_date}")
+    kpi(_("kpi_sites"), f"{int(site_kpi['total_sites']):,}", f"{_('kpi_sites_sub')} {latest_date}")
 with c2:
-    kpi("Sites actifs", f"{int(site_kpi['active_sites']):,}", "RAN opérationnel")
+    kpi(_("kpi_active"), f"{int(site_kpi['active_sites']):,}", _("kpi_active_sub"))
 with c3:
-    kpi("Sites bloqués", f"{int(site_kpi['blocked_sites']):,}", "Sites sous impact")
+    kpi(_("kpi_blocked"), f"{int(site_kpi['blocked_sites']):,}", _("kpi_blocked_sub"))
 with c4:
-    kpi("Équipements", f"{int(equipment_kpi['total_equipment']):,}", "Modules installés")
+    kpi(_("kpi_equip"), f"{int(equipment_kpi['total_equipment']):,}", _("kpi_equip_sub"))
 with c5:
-    kpi("Disponibilité", f"{availability}%", "Taux opérationnel")
+    kpi(_("kpi_avail"), f"{availability}%", _("kpi_avail_sub"))
 
 st.divider()
 
@@ -229,30 +146,33 @@ ORDER BY snapshot_date, object_type
 left, right = st.columns(2)
 
 with left:
-    st.markdown('<div class="section-title">Évolution des sites</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-title">{_("sec_evol")}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="content-card">', unsafe_allow_html=True)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=summary["snapshot_date"],
         y=summary["nb_sites"],
         mode="lines+markers",
-        line=dict(color="#b91c1c", width=3),
+        line=dict(color="#eb1019", width=3),
         marker=dict(size=9),
-        name="Sites",
+        name=_("kpi_sites"),
     ))
     fig.update_layout(template="plotly_white", height=350, margin=dict(l=20, r=20, t=30, b=20))
     st.plotly_chart(fig, width="stretch")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 with right:
-    st.markdown('<div class="section-title">Sites actifs vs bloqués</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-title">{_("sec_active_blocked")}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="content-card">', unsafe_allow_html=True)
     state_df = summary.melt(
         id_vars=["snapshot_date"],
         value_vars=["active_sites", "blocked_sites"],
         var_name="État",
-        value_name="Sites",
+        value_name=_("kpi_sites"),
     )
     state_df["État"] = state_df["État"].replace({
-        "active_sites": "Actifs",
-        "blocked_sites": "Bloqués",
+        "active_sites": _("state_active"),
+        "blocked_sites": _("state_blocked"),
     })
     fig = px.bar(
         state_df,
@@ -260,12 +180,14 @@ with right:
         y="Sites",
         color="État",
         barmode="group",
-        color_discrete_map={"Actifs": "#b91c1c", "Bloqués": "#fca5a5"},
+        color_discrete_map={"Actifs": "#eb1019", "Bloqués": "#ffb3b3"},
     )
     fig.update_layout(template="plotly_white", height=350, margin=dict(l=20, r=20, t=30, b=20))
     st.plotly_chart(fig, width="stretch")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="section-title">Répartition des cellules par technologie</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-title">{_("sec_cells")}</div>', unsafe_allow_html=True)
+st.markdown('<div class="content-card">', unsafe_allow_html=True)
 
 cells_df = summary.melt(
     id_vars=["snapshot_date"],
@@ -288,17 +210,19 @@ fig_cells = px.bar(
     color="Technologie",
     barmode="group",
     color_discrete_map={
-        "2G": "#7f1d1d",
-        "3G": "#991b1b",
-        "4G": "#b91c1c",
-        "5G": "#fca5a5",
+        "2G": "#7a080d",
+        "3G": "#b50d13",
+        "4G": "#eb1019",
+        "5G": "#ff8080",
     },
 )
 
 fig_cells.update_layout(template="plotly_white", height=400, margin=dict(l=20, r=20, t=30, b=20))
 st.plotly_chart(fig_cells, width="stretch")
+st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="section-title">Distribution des équipements</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-title">{_("sec_equip")}</div>', unsafe_allow_html=True)
+st.markdown('<div class="content-card">', unsafe_allow_html=True)
 
 fig_eq = px.bar(
     equipment_summary,
@@ -306,12 +230,15 @@ fig_eq = px.bar(
     y="equipment_count",
     color="object_type",
     barmode="group",
+    color_discrete_sequence=["#eb1019", "#ff4d4d", "#ff8080", "#ffb3b3", "#ffe6e6"]
 )
 
 fig_eq.update_layout(template="plotly_white", height=430, margin=dict(l=20, r=20, t=30, b=20))
 st.plotly_chart(fig_eq, width="stretch")
+st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="section-title">Synthèse opérationnelle</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-title">{_("sec_synth")}</div>', unsafe_allow_html=True)
+st.markdown('<div class="content-card">', unsafe_allow_html=True)
 
 summary_display = summary.copy()
 summary_display["availability_percent"] = (
@@ -319,3 +246,4 @@ summary_display["availability_percent"] = (
 ).round(2)
 
 st.dataframe(summary_display, width="stretch", hide_index=True)
+st.markdown('</div>', unsafe_allow_html=True)

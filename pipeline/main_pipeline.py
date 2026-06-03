@@ -374,8 +374,6 @@ def delta_status(delta: int | float, negative_when_up: bool = False) -> str:
         return "WARNING_UP" if delta > 0 else "OK_DOWN"
 
     return "UP" if delta > 0 else "DOWN"
-
-
 # ============================================================
 # RAPPORTS SITE CHANGE / SUMMARY / DELTA
 # ============================================================
