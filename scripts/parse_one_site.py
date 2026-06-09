@@ -66,7 +66,7 @@ def parse_one_site(snapshot_date="2026.05.14"):
     output = SILVER_PATH / f"managed_objects_{snapshot_date}.csv"
     df.to_csv(output, index=False, encoding="utf-8-sig")
 
-    print(df.head(20))
+    print(df)
     print(f"\nNombre managedObject: {len(df)}")
     print(f"Saved to: {output}")
 

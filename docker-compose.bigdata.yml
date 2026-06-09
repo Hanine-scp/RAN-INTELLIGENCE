@@ -1,0 +1,86 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: ran-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ranadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ranpassword}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: ran-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-ranadmin} ${MINIO_ROOT_PASSWORD:-ranpassword} &&
+      mc mb --ignore-existing local/ran-bronze &&
+      mc mb --ignore-existing local/ran-silver &&
+      mc mb --ignore-existing local/ran-gold
+      "
+
+  spark-master:
+    image: bitnami/spark:3.5.2
+    container_name: ran-spark-master
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    volumes:
+      - spark_data:/bitnami
+
+  spark-worker:
+    image: bitnami/spark:3.5.2
+    container_name: ran-spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 4G
+      SPARK_WORKER_CORES: 2
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+    ports:
+      - "8082:8081"
+    volumes:
+      - spark_data:/bitnami
+
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: ran-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ran_meta}
+      POSTGRES_USER: ${POSTGRES_USER:-ran_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ran_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: ran-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  minio_data:
+  spark_data:
+  postgres_data:
+  redis_data:

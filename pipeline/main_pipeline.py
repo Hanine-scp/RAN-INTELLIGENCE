@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import re
 import shutil
 import sys
@@ -22,6 +23,7 @@ from src.parsers.nokia_parser import (
     build_final_equipment_inventory,
     parse_folder_parallel,
 )
+from config.settings import RAW_DATA_PATH
 
 APP_NAME = "ran-intelligence-platform"
 DATE_FOLDER_PATTERN = re.compile(r"^\d{4}[.\-_]\d{2}[.\-_]\d{2}$")
@@ -50,7 +52,8 @@ class ProjectPaths:
         root: Path,
         source_root: Optional[Path] = None,
     ) -> "ProjectPaths":
-        source = source_root or (root / "DATA.XML")
+        default_source = Path(os.getenv("DATA_XML_ROOT", str(RAW_DATA_PATH)))
+        source = source_root or default_source
         lake = root / "data" / "lake"
         processed = root / "data" / "processed"
 
@@ -689,6 +692,235 @@ def parse_one_date_batch(
     require_columns(df_equipment_raw, REQUIRED_EQUIPMENT_COLUMNS, f"equipment_raw[{batch.folder_date}]")
 
     return df_sites, df_equipment_raw
+
+
+def export_one_date_batch(
+    batch: DateBatch,
+    paths: ProjectPaths,
+    *,
+    recursive_xml: bool = True,
+    max_workers: Optional[int] = None,
+) -> dict[str, int]:
+    """Parse one snapshot folder and export its per-date lake parquet files."""
+    date_token = safe_filename_date(batch.folder_date)
+
+    df_sites, df_equipment_raw = parse_one_date_batch(
+        batch=batch,
+        source_root=paths.source_root,
+        recursive_xml=recursive_xml,
+        max_workers=max_workers,
+    )
+
+    df_equipment = normalize_dataframe(build_final_equipment_inventory(df_equipment_raw))
+    df_equipment = force_folder_snapshot(df_equipment, batch.folder_date, batch.folder_name)
+
+    df_counters = normalize_dataframe(build_equipment_class_counter(df_equipment))
+    df_counters = force_folder_snapshot(df_counters, batch.folder_date, batch.folder_name)
+
+    df_completeness = normalize_dataframe(build_equipment_completeness_report(df_equipment))
+    df_completeness = force_folder_snapshot(df_completeness, batch.folder_date, batch.folder_name)
+
+    export_dataset(df_sites, paths.sites_lake / f"sites_{date_token}.parquet")
+    export_dataset(df_equipment, paths.equipment_lake / f"equipment_{date_token}.parquet")
+    export_dataset(df_counters, paths.counters_lake / f"counters_{date_token}.parquet")
+    export_dataset(df_completeness, paths.completeness_lake / f"completeness_{date_token}.parquet")
+
+    return {
+        "sites_count": len(df_sites),
+        "equipment_count": len(df_equipment),
+        "counters_count": len(df_counters),
+        "completeness_count": len(df_completeness),
+    }
+
+
+def load_lake_partitions(lake_folder: Path, prefix: str) -> pd.DataFrame:
+    files = sorted(lake_folder.glob(f"{prefix}_*.parquet"))
+    if not files:
+        return pd.DataFrame()
+    frames = [pd.read_parquet(path) for path in files]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def rebuild_consolidated_outputs(paths: ProjectPaths) -> dict[str, int]:
+    """Rebuild consolidated processed datasets and delta tables from lake partitions."""
+    df_sites_all = load_lake_partitions(paths.sites_lake, "sites")
+    df_equipment_all = load_lake_partitions(paths.equipment_lake, "equipment")
+    df_counters_all = load_lake_partitions(paths.counters_lake, "counters")
+    df_completeness_all = load_lake_partitions(paths.completeness_lake, "completeness")
+
+    df_site_changes = build_site_change_report(df_sites_all)
+    df_snapshot_summary = build_snapshot_summary(df_sites_all, df_equipment_all)
+    df_delta_metrics, df_delta_site_details = build_all_consecutive_deltas(df_sites_all, df_equipment_all)
+
+    export_dataset(df_sites_all, paths.processed / "site_status.parquet", paths.processed / "site_status.csv")
+    export_dataset(
+        df_equipment_all,
+        paths.processed / "equipment_inventory.parquet",
+        paths.processed / "equipment_inventory.csv",
+    )
+    export_dataset(
+        df_counters_all,
+        paths.processed / "equipment_class_counter.parquet",
+        paths.processed / "equipment_class_counter.csv",
+    )
+    export_dataset(
+        df_completeness_all,
+        paths.processed / "equipment_completeness_report.parquet",
+        paths.processed / "equipment_completeness_report.csv",
+    )
+    export_dataset(
+        df_site_changes,
+        paths.site_changes_lake / "site_changes.parquet",
+        paths.processed / "site_change_report.csv",
+    )
+    export_dataset(
+        df_snapshot_summary,
+        paths.delta_lake / "snapshot_summary.parquet",
+        paths.processed / "snapshot_summary.csv",
+    )
+    export_dataset(
+        df_delta_metrics,
+        paths.delta_lake / "delta_metrics.parquet",
+        paths.processed / "delta_metrics.csv",
+    )
+    export_dataset(
+        df_delta_site_details,
+        paths.delta_lake / "delta_site_details.parquet",
+        paths.processed / "delta_site_details.csv",
+    )
+
+    return {
+        "total_sites": len(df_sites_all),
+        "total_equipment": len(df_equipment_all),
+        "snapshot_count": int(df_sites_all["snapshot_date"].nunique()) if not df_sites_all.empty else 0,
+    }
+
+
+def process_uploaded_snapshot(
+    snapshot_folder_name: str,
+    *,
+    project_root: Optional[Path] = None,
+    source_root: Optional[Path] = None,
+    recursive_xml: bool = True,
+    max_workers: Optional[int] = None,
+) -> dict[str, Any]:
+    """
+    Parse one uploaded snapshot folder, refresh its lake partitions,
+    then rebuild consolidated outputs for the dashboard.
+    """
+    started = time.perf_counter()
+    root = (project_root or Path(__file__).resolve().parents[1]).resolve()
+    paths = ProjectPaths.from_root(root=root, source_root=source_root)
+
+    folder_name = snapshot_folder_name.strip()
+    folder_path = paths.source_root / folder_name
+    if not folder_path.is_dir():
+        raise FileNotFoundError(f"Snapshot folder not found: {folder_path}")
+
+    xml_count = count_xml_files(folder_path, recursive=recursive_xml)
+    if xml_count == 0:
+        raise ValueError(f"No XML files found in snapshot folder: {folder_path}")
+
+    batch = DateBatch(
+        folder_date=normalize_folder_date(folder_name),
+        folder_name=folder_name,
+        folder_path=folder_path,
+        xml_count=xml_count,
+    )
+
+    prepare_folders(paths, clean=False)
+    date_counts = export_one_date_batch(
+        batch,
+        paths,
+        recursive_xml=recursive_xml,
+        max_workers=max_workers,
+    )
+    consolidated = rebuild_consolidated_outputs(paths)
+    validate_lake(paths)
+
+    elapsed = time.perf_counter() - started
+    return {
+        "snapshot_date": batch.folder_date,
+        "snapshot_folder": batch.folder_name,
+        "xml_count": xml_count,
+        "processing_seconds": round(elapsed, 2),
+        **date_counts,
+        **consolidated,
+    }
+
+
+def find_snapshot_folder(source_root: Path, snapshot_date: str) -> Optional[Path]:
+    if not source_root.exists():
+        return None
+    for folder in source_root.iterdir():
+        if folder.is_dir() and normalize_folder_date(folder.name) == snapshot_date:
+            return folder
+    return None
+
+
+def delete_snapshot_partitions(paths: ProjectPaths, snapshot_date: str) -> list[str]:
+    date_token = safe_filename_date(snapshot_date)
+    removed: list[str] = []
+    partitions = {
+        "sites": paths.sites_lake / f"sites_{date_token}.parquet",
+        "equipment": paths.equipment_lake / f"equipment_{date_token}.parquet",
+        "counters": paths.counters_lake / f"counters_{date_token}.parquet",
+        "completeness": paths.completeness_lake / f"completeness_{date_token}.parquet",
+    }
+    for name, parquet_path in partitions.items():
+        if parquet_path.exists():
+            parquet_path.unlink()
+            removed.append(name)
+    return removed
+
+
+def delete_snapshots(
+    snapshot_dates: list[str],
+    *,
+    project_root: Optional[Path] = None,
+    source_root: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Delete selected snapshots from XML source folders and lake partitions."""
+    started = time.perf_counter()
+    root = (project_root or Path(__file__).resolve().parents[1]).resolve()
+    paths = ProjectPaths.from_root(root=root, source_root=source_root)
+
+    deleted: list[dict[str, Any]] = []
+    not_found: list[str] = []
+
+    for snapshot_date in sorted({str(date).strip() for date in snapshot_dates if str(date).strip()}):
+        folder = find_snapshot_folder(paths.source_root, snapshot_date)
+        removed_partitions = delete_snapshot_partitions(paths, snapshot_date)
+        removed_xml = False
+        if folder and folder.exists():
+            shutil.rmtree(folder)
+            removed_xml = True
+
+        if removed_partitions or removed_xml:
+            deleted.append(
+                {
+                    "snapshot_date": snapshot_date,
+                    "xml_folder_removed": removed_xml,
+                    "lake_partitions_removed": removed_partitions,
+                }
+            )
+        else:
+            not_found.append(snapshot_date)
+
+    consolidated = rebuild_consolidated_outputs(paths) if deleted else {
+        "total_sites": 0,
+        "total_equipment": 0,
+        "snapshot_count": 0,
+    }
+
+    elapsed = time.perf_counter() - started
+    return {
+        "deleted_count": len(deleted),
+        "deleted": deleted,
+        "not_found": not_found,
+        "processing_seconds": round(elapsed, 2),
+        **consolidated,
+    }
 
 
 # ============================================================

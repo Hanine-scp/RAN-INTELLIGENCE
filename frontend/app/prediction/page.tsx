@@ -25,8 +25,15 @@ export default function PredictionPage() {
   }, [payload]);
 
   return (
-    <PageShell title={t(filters.language, "page_pred_title")} subtitle="Prediction d'evolution des equipements">
-      <MultiBarChart data={rows} xKey="object_type" bars={[{ key: "risk_score", color: "#dc2626" }]} />
+    <PageShell title={t(filters.language, "page_pred_title")} subtitle={t(filters.language, "subtitle_prediction")}>
+      <MultiBarChart
+        data={rows}
+        xKey="object_type"
+        bars={[
+          { key: "forecast_changes_30d", color: "#dc2626" },
+          { key: "forecast_changes_90d", color: "#f97316" },
+        ]}
+      />
       <DataTable rows={rows} />
     </PageShell>
   );

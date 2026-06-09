@@ -1,0 +1,475 @@
+"""Moteur conversationnel premium RAN Intelligence — réponses flexibles style assistant IA."""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from src.services.data_service import FilterContext, data_service
+
+BRAND = "RAN Intelligence"
+
+_GREETING = re.compile(
+    r"^(bonjour|bonsoir|salut|coucou|hello|hi|hey|good\s+(morning|afternoon|evening)|bon\s+jour)\b",
+    re.I,
+)
+_THANKS = re.compile(r"\b(merci|thank(s| you)|thx|parfait|super|génial|excellent|ok\s+merci)\b", re.I)
+_HELP = re.compile(
+    r"\b(aide|help|comment\s+utiliser|que\s+peux|que\s+pouvez|what\s+can\s+you|capabilities|fonctionnalités)\b",
+    re.I,
+)
+_IDENTITY = re.compile(
+    r"\b(qui\s+es|who\s+are\s+you|présente|present\s+yourself|ton\s+nom|your\s+name|c'est\s+quoi)\b",
+    re.I,
+)
+_FOLLOW_UP = re.compile(
+    r"^(et\s+|also\s+|plus\s+|encore\s+|continue|explique|détail|detail|pourquoi|why|how\s+about|concernant)",
+    re.I,
+)
+
+
+def _is_french(ctx: FilterContext) -> bool:
+    return (ctx.language or "Français").lower().startswith("fr")
+
+
+def _flexible_suggestions(fr: bool) -> list[str]:
+    if fr:
+        return [
+            "Quels sont les sites critiques aujourd'hui ?",
+            "Génère un rapport NOC pour la période sélectionnée.",
+            "RCA du site — remplace par un site_id réel",
+            "Top 10 des sites avec le plus de remplacements.",
+            "Résume la qualité réseau et les anomalies actives.",
+        ]
+    return [
+        "Which sites are critical today?",
+        "Generate a NOC report for the selected period.",
+        "RCA for site — replace with a real site_id",
+        "Top 10 sites with the most replacements.",
+        "Summarize network quality and active anomalies.",
+    ]
+
+
+def _context_line(ctx: FilterContext, fr: bool) -> str:
+    dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
+    vendor = (ctx.vendor or "nokia").upper()
+    if not dates:
+        scope = "tous les snapshots disponibles" if fr else "all available snapshots"
+    elif len(dates) == 1:
+        scope = f"snapshot **{dates[0]}**" if fr else f"snapshot **{dates[0]}**"
+    else:
+        scope = f"période **{dates[0]} → {dates[-1]}** ({len(dates)} dates)" if fr else (
+            f"period **{dates[0]} → {dates[-1]}** ({len(dates)} dates)"
+        )
+    sites = ctx.selected_sites or []
+    if sites:
+        site_hint = f" · {len(sites)} site(s) ciblé(s)" if fr else f" · {len(sites)} targeted site(s)"
+    else:
+        site_hint = ""
+    return f"**Contexte actif** : {vendor} · {scope}{site_hint}"
+
+
+def _history_tail(history: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    cleaned = [m for m in history if m.get("role") in {"user", "assistant"} and str(m.get("content", "")).strip()]
+    return cleaned[-limit:]
+
+
+def _last_user_question(history: list[dict[str, Any]]) -> str:
+    for msg in reversed(history):
+        if msg.get("role") == "user":
+            return str(msg.get("content", "")).strip()
+    return ""
+
+
+def _expand_question(question: str, history: list[dict[str, Any]]) -> str:
+    q = question.strip()
+    if len(q) > 40 or not history:
+        return q
+    prev = _last_user_question(history)
+    if not prev:
+        return q
+    if _FOLLOW_UP.search(q) or len(q.split()) <= 4:
+        return f"{prev} — {q}"
+    return q
+
+
+def _greeting_response(ctx: FilterContext, question: str) -> dict[str, Any]:
+    fr = _is_french(ctx)
+    hour_greet = "Bonjour" if fr else "Hello"
+    if re.search(r"bonsoir|evening|afternoon", question, re.I):
+        hour_greet = "Bonsoir" if fr else "Good evening"
+
+    message = (
+        f"{hour_greet} ! Je suis **{BRAND}**, votre assistant intelligent pour l'analyse du réseau d'accès radio.\n\n"
+        f"{_context_line(ctx, fr)}\n\n"
+        "Je peux vous aider de manière **flexible** :\n"
+        "- répondre en langage naturel à vos questions réseau ;\n"
+        "- explorer sites, équipements, qualité, delta et tendances ;\n"
+        "- analyser des fichiers XML/CSV/images que vous joignez ;\n"
+        "- clarifier, reformuler ou approfondir un sujet déjà abordé.\n\n"
+        "Dites-moi simplement ce qui vous intéresse — pas besoin de formuler comme une requête technique."
+        if fr
+        else (
+            f"{hour_greet}! I'm **{BRAND}**, your intelligent assistant for radio access network analysis.\n\n"
+            f"{_context_line(ctx, fr)}\n\n"
+            "I can help **flexibly** by:\n"
+            "- answering network questions in natural language;\n"
+            "- exploring sites, equipment, quality, delta and trends;\n"
+            "- analyzing attached XML/CSV/images;\n"
+            "- clarifying or deepening topics from our conversation.\n\n"
+            "Tell me what you're interested in — no rigid ops-style query required."
+        )
+    )
+    return {
+        "intent": "greeting",
+        "message": message,
+        "rows": [],
+        "details": [],
+        "sources": [],
+        "suggested_questions": _flexible_suggestions(fr),
+        "assistant_brand": BRAND,
+    }
+
+
+def _thanks_response(ctx: FilterContext) -> dict[str, Any]:
+    fr = _is_french(ctx)
+    message = (
+        "Avec plaisir ! N'hésitez pas si vous souhaitez creuser un autre angle ou changer de sujet."
+        if fr
+        else "You're welcome! Feel free to explore another angle or switch topics anytime."
+    )
+    return {
+        "intent": "thanks",
+        "message": message,
+        "rows": [],
+        "details": [],
+        "sources": [],
+        "suggested_questions": _flexible_suggestions(fr),
+        "assistant_brand": BRAND,
+    }
+
+
+def _help_response(ctx: FilterContext, openai_enabled: bool = False) -> dict[str, Any]:
+    fr = _is_french(ctx)
+    premium_block = (
+        "\n\n**Mode premium OpenAI** activé — l'agent appelle des outils backend contrôlés "
+        "(RCA site, rapport NOC, anomalies, qualité) sans accès direct au réseau."
+        if openai_enabled and fr
+        else (
+            "\n\n**OpenAI premium mode** enabled — the agent calls controlled backend tools "
+            "(site RCA, NOC report, anomalies, quality) without direct network access."
+            if openai_enabled
+            else ""
+        )
+    )
+    message = (
+        f"**{BRAND}** fonctionne comme un assistant conversationnel premium :\n\n"
+        "1. **Posez votre question librement** — analyse réseau, RCA, rapport NOC, explications.\n"
+        "2. **Joignez des fichiers** (XML Nokia, CSV, captures) pour une analyse enrichie.\n"
+        "3. **Enchaînez naturellement** — « et pour le Nord ? », « détaille », « RCA site TN-XXX ».\n"
+        "4. **Historique** — chaque conversation est mémorisée dans la barre latérale.\n"
+        "5. **Moteur de règles** — anomalies détectées avant explication IA."
+        f"{premium_block}\n\n"
+        f"{_context_line(ctx, fr)}\n\n"
+        "Exemples : sites critiques aujourd'hui, RCA site, rapport NOC région, top remplacements, qualité."
+        if fr
+        else (
+            f"**{BRAND}** works like a premium conversational assistant:\n\n"
+            "1. **Ask freely** — network analysis, RCA, NOC report, explanations.\n"
+            "2. **Attach files** (Nokia XML, CSV, screenshots) for enriched analysis.\n"
+            "3. **Follow up naturally** — “what about the North?”, “RCA for site TN-XXX”.\n"
+            "4. **History** — every conversation is saved in the sidebar.\n"
+            "5. **Rules engine** — anomalies detected before AI explanation."
+            f"{premium_block}\n\n"
+            f"{_context_line(ctx, fr)}\n\n"
+            "Examples: critical sites today, site RCA, regional NOC report, top replacements, quality."
+        )
+    )
+    return {
+        "intent": "help",
+        "message": message,
+        "rows": [],
+        "details": [],
+        "sources": [],
+        "suggested_questions": _flexible_suggestions(fr),
+        "assistant_brand": BRAND,
+    }
+
+
+def _identity_response(ctx: FilterContext) -> dict[str, Any]:
+    fr = _is_french(ctx)
+    message = (
+        f"Je suis **{BRAND}**, l'assistant IA intégré à la plateforme d'analyse RAN.\n\n"
+        "Mon rôle : vous accompagner avec des réponses **claires, contextuelles et actionnables** "
+        "sur vos données réseau — sans jargon ops imposé.\n\n"
+        f"{_context_line(ctx, fr)}"
+        if fr
+        else (
+            f"I'm **{BRAND}**, the AI assistant embedded in the RAN analytics platform.\n\n"
+            "My role is to provide **clear, contextual and actionable** answers about your network data — "
+            "without rigid ops jargon.\n\n"
+            f"{_context_line(ctx, fr)}"
+        )
+    )
+    return {
+        "intent": "identity",
+        "message": message,
+        "rows": [],
+        "details": [],
+        "sources": [],
+        "suggested_questions": _flexible_suggestions(fr),
+        "assistant_brand": BRAND,
+    }
+
+
+def _general_discovery(ctx: FilterContext, question: str) -> dict[str, Any]:
+    fr = _is_french(ctx)
+    q = question.strip()
+    intro = (
+        f"Voici comment je peux vous aider avec **{BRAND}** sur votre question."
+        if fr
+        else f"Here's how **{BRAND}** can help with your question."
+    )
+    if q:
+        intro = (
+            f"J'ai bien noté : « {q} ».\n\n"
+            "Je n'ai pas encore de jeu de données précis pour cette formulation, mais voici des pistes utiles :"
+            if fr
+            else (
+                f"I noted: “{q}”.\n\n"
+                "I don't have an exact dataset match for this wording yet, but here are useful directions:"
+            )
+        )
+
+    message = (
+        f"{intro}\n\n"
+        f"{_context_line(ctx, fr)}\n\n"
+        "**Pistes d'exploration**\n"
+        "- État qualité et complétude des inventaires\n"
+        "- Évolution entre snapshots (delta)\n"
+        "- Sites, technologies (2G/3G/4G/5G), versions logicielles\n"
+        "- Remplacements et anomalies serials\n"
+        "- Prévisions spares et cartes à risque\n\n"
+        "Reformulez librement ou joignez un fichier — je m'adapte à votre façon de travailler."
+        if fr
+        else (
+            f"{intro}\n\n"
+            f"{_context_line(ctx, fr)}\n\n"
+            "**Exploration paths**\n"
+            "- Quality state and inventory completeness\n"
+            "- Snapshot evolution (delta)\n"
+            "- Sites, technologies (2G/3G/4G/5G), software versions\n"
+            "- Replacements and serial anomalies\n"
+            "- Spares forecasts and risk cards\n\n"
+            "Rephrase freely or attach a file — I adapt to how you work."
+        )
+    )
+    return {
+        "intent": "discovery",
+        "message": message,
+        "rows": [],
+        "details": [],
+        "sources": [],
+        "suggested_questions": _flexible_suggestions(fr),
+        "assistant_brand": BRAND,
+    }
+
+
+def _narrate_data_insight(ctx: FilterContext, question: str, raw: dict[str, Any]) -> dict[str, Any]:
+    fr = _is_french(ctx)
+    intent = str(raw.get("intent") or "insight")
+    rows = raw.get("rows") or []
+    row_count = len(rows) if isinstance(rows, list) else 0
+    brief = str(raw.get("message") or "").strip()
+
+    parts: list[str] = []
+
+    if question.strip():
+        parts.append(
+            f"**Votre question** : {question.strip()}" if fr else f"**Your question**: {question.strip()}"
+        )
+
+    parts.append(_context_line(ctx, fr))
+
+    if brief and intent not in {"general_ops"}:
+        parts.append(f"**Synthèse** : {brief}" if fr else f"**Summary**: {brief}")
+
+    if row_count:
+        parts.append(
+            f"**Données** : {row_count} ligne(s) extraite(s) du lake pour répondre précisément."
+            if fr
+            else f"**Data**: {row_count} row(s) pulled from the lake to answer precisely."
+        )
+        sample = rows[:3] if isinstance(rows, list) else []
+        if sample:
+            highlights: list[str] = []
+            for row in sample:
+                if not isinstance(row, dict):
+                    continue
+                site = row.get("site_id") or row.get("site_name")
+                if site:
+                    highlights.append(f"- Site **{site}**")
+                    continue
+                obj = row.get("object_type")
+                if obj:
+                    highlights.append(f"- Type **{obj}**")
+            if highlights:
+                parts.append(
+                    ("**Aperçu**\n" if fr else "**Preview**\n") + "\n".join(highlights[:3])
+                )
+
+    interpretation = _interpret_intent(intent, raw, fr)
+    if interpretation:
+        parts.append(interpretation)
+
+    parts.append(
+        "_Réponse générée par RAN Intelligence à partir des données filtrées. "
+        "Affinez avec une question de suivi ou changez les filtres latéraux._"
+        if fr
+        else "_Response generated by RAN Intelligence from filtered data. "
+        "Refine with a follow-up or adjust sidebar filters._"
+    )
+
+    result = dict(raw)
+    result["message"] = "\n\n".join(parts)
+    result["suggested_questions"] = raw.get("suggested_questions") or _flexible_suggestions(fr)
+    result["assistant_brand"] = BRAND
+    if intent == "general_ops":
+        result["intent"] = "discovery"
+    return result
+
+
+def _interpret_intent(intent: str, raw: dict[str, Any], fr: bool) -> str:
+    summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+    if intent == "quality_summary":
+        score = summary.get("network_quality_score", raw.get("status"))
+        if fr:
+            return (
+                f"**Interprétation** : le score qualité reflète complétude et cohérence des inventaires. "
+                f"Un score ≥ 90 est sain ; entre 75 et 90, surveillance renforcée ; en dessous, action corrective."
+            )
+        return (
+            "**Interpretation**: the quality score reflects inventory completeness and consistency. "
+            "≥ 90 is healthy; 75–90 warrants monitoring; below that, corrective action."
+        )
+    if intent == "delta_compare":
+        if fr:
+            return "**Interprétation** : le delta met en évidence ce qui a bougé entre deux snapshots — utile pour prioriser les visites site ou audits."
+        return "**Interpretation**: delta highlights what changed between snapshots — useful to prioritize site visits or audits."
+    if intent.startswith("ops_"):
+        if fr:
+            return "**Interprétation** : ces résultats proviennent d'agrégations sur le lake RAN. Vous pouvez demander un zoom sur un site ou une autre région."
+        return "**Interpretation**: these results come from RAN lake aggregations. Ask for a zoom on a site or another region."
+    return ""
+
+
+class AssistantIntelligenceService:
+    def classify(self, question: str, history: list[dict[str, Any]] | None = None) -> str:
+        q = (question or "").strip()
+        if not q:
+            return "help"
+        if _GREETING.search(q):
+            return "greeting"
+        if _THANKS.search(q) and len(q.split()) <= 8:
+            return "thanks"
+        if _IDENTITY.search(q):
+            return "identity"
+        if _HELP.search(q):
+            return "help"
+        if history and (_FOLLOW_UP.search(q) or len(q) < 25):
+            return "follow_up"
+        return "data"
+
+    def compose(
+        self,
+        ctx: FilterContext,
+        question: str,
+        history: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        from src.services.openai_agent_service import openai_agent_service
+
+        history = _history_tail(history or [])
+        q = (question or "").strip()
+        kind = self.classify(q, history)
+
+        if kind == "greeting":
+            result = _greeting_response(ctx, q)
+            return self._attach_engine_meta(result, openai_agent_service)
+        if kind == "thanks":
+            result = _thanks_response(ctx)
+            return self._attach_engine_meta(result, openai_agent_service)
+        if kind == "identity":
+            result = _identity_response(ctx)
+            return self._attach_engine_meta(result, openai_agent_service)
+        if kind == "help" or not q:
+            result = _help_response(ctx, openai_agent_service.is_enabled())
+            return self._attach_engine_meta(result, openai_agent_service)
+
+        effective_question = _expand_question(q, history) if kind == "follow_up" else q
+
+        claude_result = self._try_claude_rag(ctx, effective_question)
+        if claude_result:
+            return self._attach_engine_meta(claude_result, openai_agent_service)
+
+        if openai_agent_service.is_enabled():
+            premium = openai_agent_service.run(ctx, effective_question, history)
+            if premium and not premium.get("fallback"):
+                return premium
+
+        raw = data_service.get_assistant_insight(ctx, effective_question)
+
+        if raw.get("intent") == "general_ops" and kind != "follow_up":
+            result = _general_discovery(ctx, q)
+            return self._attach_engine_meta(result, openai_agent_service)
+
+        result = _narrate_data_insight(ctx, effective_question, raw)
+        return self._attach_engine_meta(result, openai_agent_service)
+
+    def _try_claude_rag(self, ctx: FilterContext, question: str) -> dict[str, Any] | None:
+        from src.services.claude_agent_service import claude_agent_service
+        from src.services.rag_service import rag_service
+
+        if not claude_agent_service.is_enabled():
+            return None
+        q_lower = question.lower()
+        if not any(
+            token in q_lower
+            for token in ("procédure", "procedure", "document", "huawei", "nokia", "vswr", "alarme", "alarm", "noc", "rapport")
+        ):
+            return None
+
+        rag_service.seed_defaults()
+        hits = rag_service.search(question, vendor=ctx.vendor or "nokia", top_k=6).get("results") or []
+        if not hits:
+            return None
+
+        answer = claude_agent_service.synthesize_rag_context(hits, question, ctx.language or "Français")
+        if not answer:
+            return None
+
+        fr = _is_french(ctx)
+        return {
+            "intent": "claude_rag_procedures",
+            "message": answer,
+            "rows": [],
+            "details": hits,
+            "sources": [{"type": "rag", **h} for h in hits],
+            "suggested_questions": _flexible_suggestions(fr),
+            "assistant_brand": BRAND,
+            "ai_engine": "claude",
+            "ai_model": claude_agent_service.model,
+            "architecture": "claude_rag_pgvector",
+        }
+
+    def _attach_engine_meta(self, result: dict[str, Any], openai_agent_service: Any) -> dict[str, Any]:
+        if result.get("ai_engine"):
+            return result
+        status = openai_agent_service.status()
+        result["ai_engine"] = status.get("engine", "local")
+        result["architecture"] = status.get("architecture", "local_rules")
+        if status.get("enabled"):
+            result["ai_model_available"] = status.get("model")
+        return result
+
+
+assistant_intelligence_service = AssistantIntelligenceService()

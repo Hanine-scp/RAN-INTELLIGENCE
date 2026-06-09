@@ -37,7 +37,6 @@ if question:
         FROM read_parquet('{SITES_PATH}')
         WHERE LOWER(site_state) = 'blocked'
         ORDER BY snapshot_date DESC, site_id
-        LIMIT 50
         """)
         st.chat_message("assistant").write("Voici les sites bloqués détectés :")
         st.dataframe(result, width="stretch", hide_index=True)
@@ -47,7 +46,6 @@ if question:
         SELECT snapshot_date, site_id, object_type, serial_number, product_code, product_name
         FROM read_parquet('{EQUIPMENT_PATH}')
         WHERE object_type = 'RMOD'
-        LIMIT 100
         """)
         st.chat_message("assistant").write("Voici un échantillon des équipements RMOD :")
         st.dataframe(result, width="stretch", hide_index=True)
@@ -60,7 +58,6 @@ if question:
         GROUP BY serial_number
         HAVING COUNT(*) > 1
         ORDER BY occurrences DESC
-        LIMIT 50
         """)
         st.chat_message("assistant").write("Voici les numéros de série répétés :")
         st.dataframe(result, width="stretch", hide_index=True)

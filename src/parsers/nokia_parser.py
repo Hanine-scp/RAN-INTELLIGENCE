@@ -809,9 +809,6 @@ def parse_folder_parallel(
     """
     files = list_xml_files(xml_folder, recursive=recursive)
 
-    if max_workers is None:
-        max_workers = max(1, (os.cpu_count() or 4) - 1)
-
     source_root_str = str(source_root or xml_folder)
 
     site_rows: List[Dict[str, Any]] = []
@@ -829,15 +826,25 @@ def parse_folder_parallel(
 
     total_files = len(tasks)
 
+    def consume_result(i: int, result: Dict[str, Any]) -> None:
+        if result.get("site"):
+            site_rows.append(result["site"])
+        equipment_rows.extend(result.get("equipment", []))
+        if i % 50 == 0 or i == total_files:
+            print(f"[PARSE] {i}/{total_files} fichiers XML traités")
+
+    # max_workers=0: sequential mode (stable when called from FastAPI on Windows)
+    if max_workers == 0:
+        for i, task in enumerate(tasks, start=1):
+            consume_result(i, _worker(task))
+        return pd.DataFrame(site_rows), pd.DataFrame(equipment_rows)
+
+    if max_workers is None:
+        max_workers = max(1, (os.cpu_count() or 4) - 1)
+
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         for i, result in enumerate(executor.map(_worker, tasks), start=1):
-            if result.get("site"):
-                site_rows.append(result["site"])
-
-            equipment_rows.extend(result.get("equipment", []))
-
-            if i % 50 == 0 or i == total_files:
-                print(f"[PARSE] {i}/{total_files} fichiers XML traités")
+            consume_result(i, result)
 
     return pd.DataFrame(site_rows), pd.DataFrame(equipment_rows)
 

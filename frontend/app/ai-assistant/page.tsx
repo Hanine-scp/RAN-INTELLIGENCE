@@ -1,43 +1,53 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { DataTable } from "@/components/data-table";
-import { PageShell } from "@/components/page-shell";
-import { askAssistant } from "@/lib/api";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { AiAssistantWorkspace } from "@/components/ai-assistant-workspace";
 import { useAppContext } from "@/components/app-provider";
-import { t } from "@/lib/i18n";
+import { OoredooPolyBackground } from "@/components/ooredoo-poly-bg";
 
-export default function AiAssistantPage() {
-  const { filters } = useAppContext();
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<string>("");
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+function AiAssistantContent() {
+  const { filters, payload } = useAppContext();
+  const searchParams = useSearchParams();
+  const siteId = searchParams.get("site_id")?.trim() || undefined;
+  const action = searchParams.get("action")?.trim();
+  const fr = filters.language === "Français";
 
-  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!question.trim()) {
-      return;
-    }
-    const result = await askAssistant(question);
-    setAnswer(result.message);
-    setRows(result.rows);
-  };
+  const seedPrompt = siteId
+    ? action === "rca"
+      ? fr
+        ? `RCA complète et analyse premium du site ${siteId} — KPI CSSR/DCR/PRB, impact, cause probable et actions terrain.`
+        : `Full premium RCA for site ${siteId} — CSSR/DCR/PRB KPIs, impact, probable cause and field actions.`
+      : fr
+        ? `Analyse IA complète du site ${siteId}`
+        : `Full AI analysis for site ${siteId}`
+    : undefined;
 
   return (
-    <PageShell title={t(filters.language, "page_ai_title")} subtitle="Assistant intelligent pour le reseau RAN">
-      <form onSubmit={onSubmit} className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4">
-        <input
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          className="w-full rounded-xl border border-zinc-200 px-3 py-2"
-          placeholder={t(filters.language, "ask_placeholder")}
+    <div className="relative flex min-h-[calc(100vh-5.5rem)] w-full items-center justify-center px-4 py-5 sm:px-8">
+      <OoredooPolyBackground className="rounded-2xl opacity-90" />
+      <div className="relative z-10 w-full max-w-6xl">
+        <AiAssistantWorkspace
+          language={filters.language}
+          payload={payload}
+          seedSiteId={siteId}
+          seedPrompt={seedPrompt}
         />
-        <button className="rounded-xl bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700" type="submit">
-          Ask
-        </button>
-      </form>
-      {answer ? <p className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-900">{answer}</p> : null}
-      <DataTable rows={rows} />
-    </PageShell>
+      </div>
+    </div>
+  );
+}
+
+export default function AiAssistantPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[calc(100vh-5.5rem)] items-center justify-center text-sm text-slate-500">
+          Chargement RAN Intelligence…
+        </div>
+      }
+    >
+      <AiAssistantContent />
+    </Suspense>
   );
 }
