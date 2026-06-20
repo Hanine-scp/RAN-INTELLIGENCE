@@ -4,16 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { MultiBarChart } from "@/components/charts";
 import { InvestigationPanel, InvestigationSection, InvestigationStatCard } from "@/components/investigation-panel";
+import { DeltaAiReportSection } from "@/components/delta-ai-report-section";
 import { PageShell } from "@/components/page-shell";
-import { getDeltaCompare, investigateSite } from "@/lib/api";
+import { getDeltaCompare, investigateSite } from "@/lib/api-delta";
 import { useAppContext } from "@/components/app-provider";
+import { DELTA_COLORS } from "@/lib/chart-theme";
 
 type DeltaUnifiedPageProps = {
   title: string;
   subtitle: string;
+  embedded?: boolean;
 };
 
-export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
+export function DeltaUnifiedPage({ title, subtitle, embedded = false }: DeltaUnifiedPageProps) {
   const { payload } = useAppContext();
   const [compareDate1, setCompareDate1] = useState("");
   const [compareDate2, setCompareDate2] = useState("");
@@ -26,9 +29,14 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
   });
   const [addedSiteLoading, setAddedSiteLoading] = useState(false);
   const [addedSiteError, setAddedSiteError] = useState("");
-  const [compare, setCompare] = useState<{ comparison: Record<string, unknown>[]; details: Record<string, unknown>[] }>({
+  const [compare, setCompare] = useState<{
+    comparison: Record<string, unknown>[];
+    details: Record<string, unknown>[];
+    equipment_changes: Record<string, unknown>[];
+  }>({
     comparison: [],
     details: [],
+    equipment_changes: [],
   });
 
   const hasSelection = Boolean(payload.effective_dates.length || payload.selected_dates.length);
@@ -43,12 +51,18 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
 
   useEffect(() => {
     if (!isReadyToCompare) {
-      setCompare({ comparison: [], details: [] });
+      setCompare({ comparison: [], details: [], equipment_changes: [] });
       return;
     }
     setLoading(true);
     void getDeltaCompare(payload, effectiveDate1, effectiveDate2)
-      .then(setCompare)
+      .then((data) =>
+        setCompare({
+          comparison: data.comparison ?? [],
+          details: data.details ?? [],
+          equipment_changes: data.equipment_changes ?? [],
+        }),
+      )
       .finally(() => setLoading(false));
   }, [effectiveDate1, effectiveDate2, isReadyToCompare, payload]);
 
@@ -201,6 +215,19 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
     [compare.details],
   );
 
+  const equipmentChangeRows = useMemo(() => compare.equipment_changes, [compare.equipment_changes]);
+
+  const equipmentChangeKpis = useMemo(() => {
+    const added = equipmentChangeRows.filter((row) => String(row.change_type ?? "").toUpperCase() === "ADDED").length;
+    const removed = equipmentChangeRows.filter((row) => String(row.change_type ?? "").toUpperCase() === "REMOVED").length;
+    return { added, removed, total: equipmentChangeRows.length };
+  }, [equipmentChangeRows]);
+
+  const exportDateSuffix = useMemo(
+    () => `${effectiveDate1}_vs_${effectiveDate2}`.replace(/[^\w\-]+/g, "_"),
+    [effectiveDate1, effectiveDate2],
+  );
+
   useEffect(() => {
     if (!selectedAddedSiteId) return;
     const exists = newSitesRows.some((row) => String(row.site_id ?? "") === selectedAddedSiteId);
@@ -268,7 +295,7 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
         });
       }
       const current = grouped.get(serial)!;
-      current.equipment_count += 1;
+      current.equipment_count += Number(row.nb_equipment ?? 1);
       if (objectType) current.object_types.add(objectType);
       if (productCode) current.product_codes.add(productCode);
       if (productName) current.product_names.add(productName);
@@ -287,15 +314,18 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
 
   const addedSiteKpis = useMemo(() => {
     const historyCount = addedSiteDetail.site_history.length;
-    const equipmentCount = addedSiteDetail.equipment.length;
+    const equipmentCount = addedSiteDetail.equipment.reduce(
+      (sum, row) => sum + Number(row.nb_equipment ?? 1),
+      0,
+    );
     const uniqueSerials = addedSiteSerialSummaryRows.filter((row) => String(row.serial_number ?? "").trim() && String(row.serial_number ?? "") !== "N/A").length;
     const repeatedSerials = addedSiteSerialSummaryRows.filter((row) => Number(row.equipment_count ?? 0) > 1).length;
     const latestState = String(addedSiteLatestSnapshot?.site_state ?? "-");
     return { historyCount, equipmentCount, uniqueSerials, repeatedSerials, latestState };
   }, [addedSiteDetail.equipment.length, addedSiteDetail.site_history.length, addedSiteLatestSnapshot, addedSiteSerialSummaryRows]);
 
-  return (
-    <PageShell title={title} subtitle={subtitle}>
+  const body = (
+    <>
       <section className="rounded-2xl border border-red-100 bg-gradient-to-r from-white to-red-50/50 p-4 shadow-[0_10px_28px_rgba(220,38,38,0.08)]">
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm font-semibold text-slate-800">Periode de comparaison</p>
@@ -337,6 +367,13 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
         </div>
       </section>
 
+      <DeltaAiReportSection
+        referenceDate={effectiveDate1}
+        comparisonDate={effectiveDate2}
+        isReady={isReadyToCompare && !loading}
+        compare={compare}
+      />
+
       {!hasSelection ? (
         <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">Aucune donnée. Sélectionnez un snapshot pour commencer.</p>
       ) : !isReadyToCompare ? (
@@ -374,7 +411,7 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
                   height={170}
                   framed={false}
                   forceDualAxis
-                  bars={[{ key: "ancien", color: "#fecaca" }, { key: "nouveau", color: "#b91c1c" }]}
+                  bars={[{ key: "ancien", color: DELTA_COLORS.afterLight }, { key: "nouveau", color: DELTA_COLORS.after }]}
                 />
                 <p className="mt-2 rounded-lg border border-rose-100 bg-rose-50/40 p-2 text-sm font-semibold text-slate-700">
                   Delta sites: {sitesComparison.delta >= 0 ? "+" : ""}
@@ -394,7 +431,7 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
                   height={170}
                   framed={false}
                   forceDualAxis
-                  bars={[{ key: "ancien", color: "#cbd5e1" }, { key: "nouveau", color: "#dc2626" }]}
+                  bars={[{ key: "ancien", color: DELTA_COLORS.before }, { key: "nouveau", color: DELTA_COLORS.after }]}
                 />
                 <p className="mt-2 rounded-lg border border-red-100 bg-red-50/40 p-2 text-sm font-semibold text-slate-700">
                   Delta équipements: {equipmentComparison.delta >= 0 ? "+" : ""}
@@ -422,8 +459,8 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
                     }
                   }}
                   bars={[
-                    { key: "ancienne_valeur", color: "#fca5a5" },
-                    { key: "nouvelle_valeur", color: "#dc2626" },
+                    { key: "ancienne_valeur", color: DELTA_COLORS.ancienne_valeur },
+                    { key: "nouvelle_valeur", color: DELTA_COLORS.nouvelle_valeur },
                   ]}
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
@@ -471,10 +508,16 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
           </section>
 
           <section className="rounded-2xl border border-red-100 bg-white p-4 shadow-[0_8px_24px_rgba(220,38,38,0.08)]">
-            <p className="mb-2 text-sm font-semibold text-slate-800">Tableau cellules</p>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-800">Delta Table 1 — Cellules par technologie</p>
+              <span className="text-[11px] font-medium text-slate-500">
+                GNCEL=2G · WNCEL=3G · LNCEL/LNCEL_FDD/LNCEL_TDD=4G · NRCELL=5G
+              </span>
+            </div>
             <DataTable
               rows={cellsComparison.tableRows}
-              showControls={false}
+              exportFileName={`delta_table_1_cellules_${exportDateSuffix}`}
+              showControls={true}
               showIndex={false}
               showSelection={false}
               enableSorting={false}
@@ -488,8 +531,49 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
           </section>
 
           <section className="rounded-2xl border border-red-100 bg-white p-4 shadow-[0_8px_24px_rgba(220,38,38,0.08)]">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-800">Delta Table 2 — Équipements modifiés</p>
+              <div className="flex items-center gap-2 text-[11px] font-semibold">
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                  Ajoutés: {equipmentChangeKpis.added}
+                </span>
+                <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-red-700">
+                  Supprimés: {equipmentChangeKpis.removed}
+                </span>
+              </div>
+            </div>
+            {equipmentChangeRows.length ? (
+              <DataTable
+                rows={equipmentChangeRows}
+                exportFileName={`delta_table_2_equipements_${exportDateSuffix}`}
+                showControls={true}
+                showSelection={false}
+                visibleColumns={[
+                  "change_type",
+                  "site_id",
+                  "object_type",
+                  "id",
+                  "serial_number",
+                  "product_code",
+                  "product_name",
+                  "nb_equipment",
+                ]}
+                maxHeightClassName="max-h-[56vh]"
+              />
+            ) : (
+              <p className="text-sm text-slate-500">Aucun équipement ajouté ou supprimé entre ces deux snapshots.</p>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-red-100 bg-white p-4 shadow-[0_8px_24px_rgba(220,38,38,0.08)]">
             <p className="mb-2 text-sm font-semibold text-slate-800">Top impacts métriques</p>
-            <DataTable rows={impactRows} showControls={false} showSelection={false} maxHeightClassName="max-h-[56vh]" />
+            <DataTable
+              rows={impactRows}
+              exportFileName={`delta_impacts_${exportDateSuffix}`}
+              showControls={true}
+              showSelection={false}
+              maxHeightClassName="max-h-[56vh]"
+            />
           </section>
 
           <InvestigationPanel
@@ -585,6 +669,14 @@ export function DeltaUnifiedPage({ title, subtitle }: DeltaUnifiedPageProps) {
           </InvestigationPanel>
         </>
       )}
+    </>
+  );
+
+  return embedded ? (
+    <div className="space-y-4">{body}</div>
+  ) : (
+    <PageShell title={title} subtitle={subtitle}>
+      {body}
     </PageShell>
   );
 }

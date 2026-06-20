@@ -1,0 +1,27 @@
+# Phase 3 — OpenTelemetry collector (local dev / staging)
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.cache.yml -f docker-compose.observability.yml up -d
+#   Set in .env.auth:
+#     OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+#     OTEL_SERVICE_NAME=ran-intelligence-api
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: ran-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./ops/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+
+  api:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+      OTEL_SERVICE_NAME: ran-intelligence-api
+      OTEL_DEPLOYMENT_ENV: docker
+    depends_on:
+      - otel-collector

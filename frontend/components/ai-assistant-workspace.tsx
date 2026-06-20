@@ -499,24 +499,15 @@ export function AiAssistantWorkspace({ language, payload, seedSiteId, seedPrompt
 
 
   if (!ready || !activeId) {
-
     return (
-
-      <div className="flex h-[min(520px,calc(100vh-8rem))] w-full max-w-6xl items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm text-slate-500">
-
+      <div className="premium-card flex h-[min(640px,calc(100vh-12rem))] w-full items-center justify-center rounded-2xl text-sm text-slate-500">
         {language === "Français" ? "Chargement de RAN Intelligence…" : "Loading RAN Intelligence…"}
-
       </div>
-
     );
-
   }
 
-
-
   return (
-
-    <div className="flex h-[min(560px,calc(100vh-7.5rem))] w-full max-w-6xl gap-3">
+    <div className="premium-card flex h-[min(680px,calc(100vh-12rem))] w-full gap-0 overflow-hidden rounded-2xl">
 
       <AiChatSidebar
 

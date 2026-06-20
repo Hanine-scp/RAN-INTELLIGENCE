@@ -56,7 +56,14 @@ type InvestigationPanelProps = {
   loading?: boolean;
   loadingLabel?: string;
   error?: string;
+  size?: "md" | "lg" | "xl";
   children?: ReactNode;
+};
+
+const panelSizeClass: Record<NonNullable<InvestigationPanelProps["size"]>, string> = {
+  md: "w-[min(50vw,720px)] max-h-[50vh]",
+  lg: "w-[min(72vw,960px)] max-h-[68vh]",
+  xl: "w-[min(92vw,1280px)] max-h-[88vh]",
 };
 
 export function InvestigationPanel({
@@ -69,6 +76,7 @@ export function InvestigationPanel({
   loading = false,
   loadingLabel = "Analyse en cours...",
   error,
+  size = "md",
   children,
 }: InvestigationPanelProps) {
   if (!open) return null;
@@ -80,7 +88,7 @@ export function InvestigationPanel({
       role="presentation"
     >
       <section
-        className="premium-card-red relative flex w-[min(50vw,720px)] max-h-[50vh] min-w-[320px] flex-col overflow-hidden rounded-2xl shadow-[0_20px_50px_rgba(15,23,42,0.22)]"
+        className={`premium-card-red relative flex ${panelSizeClass[size]} min-w-[320px] flex-col overflow-hidden rounded-2xl shadow-[0_20px_50px_rgba(15,23,42,0.22)]`}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"

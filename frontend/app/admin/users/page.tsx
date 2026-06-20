@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/page-shell";
+import { SortableTableHeader } from "@/components/sortable-table-header";
 import { useAuth } from "@/components/auth-provider";
 import { useAppContext } from "@/components/app-provider";
 import {
@@ -14,6 +15,7 @@ import {
   setUserActive,
 } from "@/lib/api";
 import { isAdmin, type JobProfile } from "@/lib/auth";
+import { sortTableRows } from "@/lib/sort-table-rows";
 
 type CreateResult = {
   user_id: number;
@@ -55,11 +57,20 @@ export default function AdminUsersPage() {
   const [generatedKey, setGeneratedKey] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   const pendingUsers = useMemo(
     () => rows.filter((row) => String(row.role) === "user" && !Boolean(row.is_active)),
     [rows],
   );
+
+  const sortedRows = useMemo(() => sortTableRows(rows, sortColumn, sortDirection), [rows, sortColumn, sortDirection]);
+
+  const onSort = (column: string, direction: "asc" | "desc") => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -335,7 +346,7 @@ export default function AdminUsersPage() {
       <section className="rounded-2xl border border-red-100 bg-white p-4 shadow-[0_8px_24px_rgba(220,38,38,0.08)]">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-900">
-            {fr ? "Comptes" : "Accounts"} ({rows.length})
+            {fr ? "Comptes" : "Accounts"} ({sortedRows.length})
           </h3>
           <button type="button" onClick={() => void load()} className="text-xs font-semibold text-red-700 hover:underline">
             {fr ? "Actualiser" : "Refresh"}
@@ -346,18 +357,18 @@ export default function AdminUsersPage() {
           <table className="w-full min-w-[900px] text-left text-xs">
             <thead>
               <tr className="border-b border-red-100 text-[11px] uppercase tracking-wide text-slate-500">
-                <th className="px-2 py-2">{fr ? "Nom" : "Name"}</th>
-                <th className="px-2 py-2">Email</th>
-                <th className="px-2 py-2">{fr ? "Département" : "Department"}</th>
-                <th className="px-2 py-2">{fr ? "Profil" : "Profile"}</th>
+                <SortableTableHeader label={fr ? "Nom" : "Name"} column="full_name" sortColumn={sortColumn} sortDirection={sortDirection} onSort={onSort} />
+                <SortableTableHeader label="Email" column="email" sortColumn={sortColumn} sortDirection={sortDirection} onSort={onSort} />
+                <SortableTableHeader label={fr ? "Département" : "Department"} column="department" sortColumn={sortColumn} sortDirection={sortDirection} onSort={onSort} />
+                <SortableTableHeader label={fr ? "Profil" : "Profile"} column="job_profile" sortColumn={sortColumn} sortDirection={sortDirection} onSort={onSort} />
                 <th className="px-2 py-2">Email ✓</th>
                 <th className="px-2 py-2">Tel ✓</th>
-                <th className="px-2 py-2">{fr ? "Statut" : "Status"}</th>
+                <SortableTableHeader label={fr ? "Statut" : "Status"} column="is_active" sortColumn={sortColumn} sortDirection={sortDirection} onSort={onSort} />
                 <th className="px-2 py-2">{fr ? "Action" : "Action"}</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {sortedRows.map((row) => {
                 const id = Number(row.id);
                 const active = Boolean(row.is_active);
                 const isUserRole = String(row.role) === "user";

@@ -4,28 +4,66 @@ services:
       context: .
       dockerfile: Dockerfile.api
     container_name: ran-intelligence-api
+    restart: unless-stopped
+    env_file:
+      - path: .env.docker
+        required: false
+      - path: .env.auth
+        required: false
+      - path: .env.ai
+        required: false
     environment:
-      - DATA_ROOT=/app/data/lake
-      - DATA_XML_ROOT=/app/DATA.XML
+      DATA_ROOT: /app/data/lake
+      DATA_XML_ROOT: /app/DATA.XML
+      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:-}
     volumes:
-      - C:/projects/DATA.XML:/app/DATA.XML:ro
+      - ${DATA_XML_HOST_PATH:-./DATA.XML}:/app/DATA.XML:ro
+      - ${DATA_LAKE_HOST_PATH:-./data/lake}:/app/data/lake
+      - ${DATA_BRONZE_HOST_PATH:-./data/bronze}:/app/data/bronze
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 20s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
     container_name: ran-intelligence-frontend
+    restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_BASE_URL=http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
+
+  postgres-auth:
+    image: postgres:16-alpine
+    container_name: ran-auth-postgres
+    profiles: ["auth"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ran_auth
+      POSTGRES_PASSWORD: ran_auth_dev
+      POSTGRES_DB: ran_intelligence
+    ports:
+      - "${AUTH_PG_PORT:-5433}:5432"
+    volumes:
+      - ran_auth_pgdata:/var/lib/postgresql/data
+      - ./scripts/sql/auth_schema_postgres.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ran_auth -d ran_intelligence"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ran_auth_pgdata:

@@ -7,7 +7,9 @@ from typing import Any
 
 from src.services.data_service import FilterContext, data_service
 
-BRAND = "RAN Intelligence"
+BRAND = "Guardian Copilot"
+SUITE = "Guardian Nexus AI"
+TAGLINE = "Ask. Analyze. Decide. Trust."
 
 _GREETING = re.compile(
     r"^(bonjour|bonsoir|salut|coucou|hello|hi|hey|good\s+(morning|afternoon|evening)|bon\s+jour)\b",
@@ -19,13 +21,59 @@ _HELP = re.compile(
     re.I,
 )
 _IDENTITY = re.compile(
-    r"\b(qui\s+es|who\s+are\s+you|présente|present\s+yourself|ton\s+nom|your\s+name|c'est\s+quoi)\b",
+    r"\b(qui\s+es|who\s+are\s+you|présente|present\s+yourself|ton\s+nom|your\s+name)\b",
+    re.I,
+)
+_IDENTITY_SUBJECT = re.compile(
+    r"\b(copilot|assistant|bot|toi|you|ran\s+guardian|guardian\s+copilot|guardian\s+nexus|nexus\s+ai)\b",
+    re.I,
+)
+_DOMAIN_TOPIC = re.compile(
+    r"\b(ran|radio|network|réseau|reseau|lte|4g|5g|3g|nokia|huawei|bbmod|rmod|snapshot|"
+    r"anomal|cellule|cell|antenna|antenne|baseband|core|telecom|télécom|mobile|"
+    r"access|acces|inventory|inventaire|equipment|équipement|equipement)\b",
     re.I,
 )
 _FOLLOW_UP = re.compile(
     r"^(et\s+|also\s+|plus\s+|encore\s+|continue|explique|détail|detail|pourquoi|why|how\s+about|concernant)",
     re.I,
 )
+_DATA_OPS = re.compile(
+    r"\b(sites?\s+critiques?|anomal|delta|remplacement|qualit|rapport|kpi|rca|noc|inventaire|"
+    r"compteur|spares?|snapshot|équipement|equipement|equipment|top\s+\d+|liste\s+des|"
+    r"critical\s+sites?|generate\s+a\s+report|weekly|hebdom)\b",
+    re.I,
+)
+_KNOWLEDGE = re.compile(
+    r"\b(c'est\s+quoi|qu'est[\-\s]?ce|what\s+is|what\s+are|explain|explique|défin|define|"
+    r"comment\s+(fonctionne|marche)|how\s+does|radio\s+access|\bran\b|lte|4g|5g|nokia|huawei|"
+    r"telecom|télécom|network|reseau|réseau|bbmod|rmod|vswr|antenne|antenna)\b",
+    re.I,
+)
+
+
+def should_auto_web_search(question: str) -> bool:
+    q = (question or "").strip()
+    if len(q) < 8:
+        return False
+    if _DATA_OPS.search(q):
+        return False
+    return bool(_KNOWLEDGE.search(q))
+
+
+def _is_identity_question(question: str) -> bool:
+    q = (question or "").strip()
+    if not q:
+        return False
+    if _IDENTITY.search(q):
+        return True
+    if re.search(r"\b(c'est\s+quoi|what\s+is|what\s+are)\b", q, re.I):
+        if _IDENTITY_SUBJECT.search(q):
+            return True
+        if _DOMAIN_TOPIC.search(q):
+            return False
+        return False
+    return False
 
 
 def _is_french(ctx: FilterContext) -> bool:
@@ -163,26 +211,34 @@ def _help_response(ctx: FilterContext, openai_enabled: bool = False) -> dict[str
         )
     )
     message = (
-        f"**{BRAND}** fonctionne comme un assistant conversationnel premium :\n\n"
-        "1. **Posez votre question librement** — analyse réseau, RCA, rapport NOC, explications.\n"
-        "2. **Joignez des fichiers** (XML Nokia, CSV, captures) pour une analyse enrichie.\n"
-        "3. **Enchaînez naturellement** — « et pour le Nord ? », « détaille », « RCA site TN-XXX ».\n"
-        "4. **Historique** — chaque conversation est mémorisée dans la barre latérale.\n"
-        "5. **Moteur de règles** — anomalies détectées avant explication IA."
+        f"**{SUITE}** · *{TAGLINE}*\n\n"
+        f"**{BRAND}** — modules premium disponibles :\n\n"
+        "| Module | Capacité |\n"
+        "|--------|----------|\n"
+        "| **Web Intelligence** | Recherche web sourcée (normes, doc constructeur, définitions RAN) |\n"
+        "| **Nexus Search** | Sites, inventaire, assets, compteurs, anomalies |\n"
+        "| **Report Studio AI** | Rapports NOC, qualité, delta, exécutif |\n"
+        "| **Risk Intelligence** | Scoring risques & anomalies |\n\n"
+        "**Pièces jointes** : XML Nokia, CSV, JSON, captures d'écran, photos — analyse automatique.\n"
+        "**Recherche web** : activez le globe via **+** ou posez une question de connaissance (ex. « qu'est-ce qu'un RAN ? »).\n"
         f"{premium_block}\n\n"
         f"{_context_line(ctx, fr)}\n\n"
-        "Exemples : sites critiques aujourd'hui, RCA site, rapport NOC région, top remplacements, qualité."
+        "Exemples : *Qu'est-ce qu'un RAN ?* · *Sites critiques cette semaine* · *Rapport NOC période active* · joindre un XML Nokia."
         if fr
         else (
-            f"**{BRAND}** works like a premium conversational assistant:\n\n"
-            "1. **Ask freely** — network analysis, RCA, NOC report, explanations.\n"
-            "2. **Attach files** (Nokia XML, CSV, screenshots) for enriched analysis.\n"
-            "3. **Follow up naturally** — “what about the North?”, “RCA for site TN-XXX”.\n"
-            "4. **History** — every conversation is saved in the sidebar.\n"
-            "5. **Rules engine** — anomalies detected before AI explanation."
+            f"**{SUITE}** · *{TAGLINE}*\n\n"
+            f"**{BRAND}** — premium modules:\n\n"
+            "| Module | Capability |\n"
+            "|--------|------------|\n"
+            "| **Web Intelligence** | Sourced web research (standards, vendor docs, RAN definitions) |\n"
+            "| **Nexus Search** | Sites, inventory, assets, counters, anomalies |\n"
+            "| **Report Studio AI** | NOC, quality, delta, executive reports |\n"
+            "| **Risk Intelligence** | Risk & anomaly scoring |\n\n"
+            "**Attachments**: Nokia XML, CSV, JSON, screenshots, photos — automatic analysis.\n"
+            "**Web search**: enable the globe via **+** or ask a knowledge question (e.g. “what is a RAN?”).\n"
             f"{premium_block}\n\n"
             f"{_context_line(ctx, fr)}\n\n"
-            "Examples: critical sites today, site RCA, regional NOC report, top replacements, quality."
+            "Examples: *What is a RAN?* · *Critical sites this week* · *NOC report for active period* · attach Nokia XML."
         )
     )
     return {
@@ -199,15 +255,25 @@ def _help_response(ctx: FilterContext, openai_enabled: bool = False) -> dict[str
 def _identity_response(ctx: FilterContext) -> dict[str, Any]:
     fr = _is_french(ctx)
     message = (
-        f"Je suis **{BRAND}**, l'assistant IA intégré à la plateforme d'analyse RAN.\n\n"
-        "Mon rôle : vous accompagner avec des réponses **claires, contextuelles et actionnables** "
-        "sur vos données réseau — sans jargon ops imposé.\n\n"
+        f"Je suis **{BRAND}**, le copilot IA de la suite **{SUITE}** — *{TAGLINE}*\n\n"
+        "Je pilote vos données RAN avec un **jargon ops NOC/RAN imposé** "
+        "(eNB/gNB, RRU, KPI, RCA, MO, delta, spares, anomalies) et m'appuie sur les modules de la suite :\n"
+        "- **Nexus Search** — recherche intelligente (sites, inventaire, assets, compteurs)\n"
+        "- **Web Intelligence** — recherche web sourcée\n"
+        "- **Risk Intelligence Engine** — scoring risques & anomalies\n"
+        "- **Report Studio AI** — génération de rapports NOC\n"
+        "- **Guardian Trust Ledger** — traçabilité blockchain des décisions critiques\n\n"
         f"{_context_line(ctx, fr)}"
         if fr
         else (
-            f"I'm **{BRAND}**, the AI assistant embedded in the RAN analytics platform.\n\n"
-            "My role is to provide **clear, contextual and actionable** answers about your network data — "
-            "without rigid ops jargon.\n\n"
+            f"I'm **{BRAND}**, the AI copilot of the **{SUITE}** suite — *{TAGLINE}*\n\n"
+            "I drive your RAN data with **imposed NOC/RAN ops jargon** "
+            "(eNB/gNB, RRU, KPI, RCA, MO, delta, spares, anomalies) and leverage the suite modules:\n"
+            "- **Nexus Search** — smart search (sites, inventory, assets, counters)\n"
+            "- **Web Intelligence** — sourced web research\n"
+            "- **Risk Intelligence Engine** — risk & anomaly scoring\n"
+            "- **Report Studio AI** — NOC report generation\n"
+            "- **Guardian Trust Ledger** — blockchain traceability of critical decisions\n\n"
             f"{_context_line(ctx, fr)}"
         )
     )
@@ -250,7 +316,7 @@ def _general_discovery(ctx: FilterContext, question: str) -> dict[str, Any]:
         "- Sites, technologies (2G/3G/4G/5G), versions logicielles\n"
         "- Remplacements et anomalies serials\n"
         "- Prévisions spares et cartes à risque\n\n"
-        "Reformulez librement ou joignez un fichier — je m'adapte à votre façon de travailler."
+        "Reformulez en langage NOC/RAN ou joignez un export (XML/CSV) — réponses en jargon ops imposé."
         if fr
         else (
             f"{intro}\n\n"
@@ -261,7 +327,7 @@ def _general_discovery(ctx: FilterContext, question: str) -> dict[str, Any]:
             "- Sites, technologies (2G/3G/4G/5G), software versions\n"
             "- Replacements and serial anomalies\n"
             "- Spares forecasts and risk cards\n\n"
-            "Rephrase freely or attach a file — I adapt to how you work."
+            "Rephrase in NOC/RAN terms or attach an export (XML/CSV) — answers use imposed ops jargon."
         )
     )
     return {
@@ -372,7 +438,7 @@ class AssistantIntelligenceService:
             return "greeting"
         if _THANKS.search(q) and len(q.split()) <= 8:
             return "thanks"
-        if _IDENTITY.search(q):
+        if _is_identity_question(q):
             return "identity"
         if _HELP.search(q):
             return "help"
@@ -407,6 +473,11 @@ class AssistantIntelligenceService:
 
         effective_question = _expand_question(q, history) if kind == "follow_up" else q
 
+        if should_auto_web_search(effective_question):
+            knowledge = self._try_web_knowledge(ctx, effective_question)
+            if knowledge:
+                return self._attach_engine_meta(knowledge, openai_agent_service)
+
         claude_result = self._try_claude_rag(ctx, effective_question)
         if claude_result:
             return self._attach_engine_meta(claude_result, openai_agent_service)
@@ -419,11 +490,81 @@ class AssistantIntelligenceService:
         raw = data_service.get_assistant_insight(ctx, effective_question)
 
         if raw.get("intent") == "general_ops" and kind != "follow_up":
+            knowledge = self._try_web_knowledge(ctx, effective_question)
+            if knowledge:
+                return self._attach_engine_meta(knowledge, openai_agent_service)
             result = _general_discovery(ctx, q)
             return self._attach_engine_meta(result, openai_agent_service)
 
         result = _narrate_data_insight(ctx, effective_question, raw)
         return self._attach_engine_meta(result, openai_agent_service)
+
+    def _try_web_knowledge(self, ctx: FilterContext, question: str) -> dict[str, Any] | None:
+        """Answer general-knowledge questions with a sourced, ChatGPT-style synthesis."""
+        from src.services.web_search_service import web_search_service
+
+        q = (question or "").strip()
+        if len(q) < 4:
+            return None
+
+        try:
+            payload = web_search_service.search(q, language=ctx.language or "Français")
+        except Exception:
+            return None
+
+        if not payload or payload.get("status") != "ok":
+            return None
+
+        results = payload.get("results") or []
+        abstract = str(payload.get("abstract") or "").strip()
+        if not abstract and not results:
+            return None
+
+        fr = _is_french(ctx)
+        corrected = str(payload.get("corrected_query") or payload.get("search_query") or q).strip()
+        original = str(payload.get("query") or q).strip()
+        topic = corrected or q
+
+        bullets: list[str] = []
+        for index, row in enumerate(results[:5], start=1):
+            snippet = str(row.get("snippet") or row.get("title") or "").strip()
+            if snippet:
+                bullets.append(f"- **[{index}]** {snippet[:200]}")
+
+        if fr:
+            parts = [
+                "## Résumé\n"
+                + (abstract or f"Synthèse sur **{topic}** d’après les sources consultées.")
+            ]
+            if bullets:
+                parts.append("## Points clés\n" + "\n".join(bullets))
+            if corrected and corrected.lower() != original.lower():
+                parts.append(f"*Requête corrigée : {corrected}*")
+            parts.append("Sources vérifiables listées ci-dessous.")
+        else:
+            parts = [
+                "## Summary\n"
+                + (abstract or f"Summary about **{topic}** from consulted sources.")
+            ]
+            if bullets:
+                parts.append("## Key points\n" + "\n".join(bullets))
+            if corrected and corrected.lower() != original.lower():
+                parts.append(f"*Corrected query: {corrected}*")
+            parts.append("Verifiable sources listed below.")
+
+        return {
+            "intent": "web_enriched",
+            "message": "\n\n".join(parts),
+            "rows": [],
+            "details": [],
+            "sources": [{"type": "web", **row} for row in results],
+            "web_search_enabled": True,
+            "web_search_meta": web_search_service.build_meta(payload),
+            "suggested_questions": _flexible_suggestions(fr),
+            "assistant_brand": BRAND,
+            "ai_engine": "web_local",
+            "architecture": "web_research_fallback",
+        }
 
     def _try_claude_rag(self, ctx: FilterContext, question: str) -> dict[str, Any] | None:
         from src.services.claude_agent_service import claude_agent_service

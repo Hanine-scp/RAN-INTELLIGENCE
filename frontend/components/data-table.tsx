@@ -1,8 +1,46 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAppContext } from "@/components/app-provider";
-import { t } from "@/lib/i18n";
+import { TableSortIcons } from "@/components/table-sort-icons";
+import { cellValueLabel, columnLabel, t } from "@/lib/i18n";
+import { formatParsedFieldValue, isParsedMissingValue } from "@/lib/parsed-field-value";
+import { sortTableRows } from "@/lib/sort-table-rows";
+
+const VIRTUAL_ROW_HEIGHT = 36;
+const VIRTUALIZE_THRESHOLD = 80;
+
+const NUMERIC_COLUMNS = new Set([
+  "serial_count",
+  "serial_occurrence",
+  "compteur",
+  "total_equipment",
+  "nb_equipment",
+  "product_code_count",
+]);
+
+function isNumericColumn(column: string) {
+  return NUMERIC_COLUMNS.has(column.toLowerCase());
+}
+
+function columnCellClass(column: string, compact: boolean) {
+  const numeric = isNumericColumn(column);
+  const padding = compact ? "px-3 py-2" : "px-2 py-1.5";
+  if (numeric) {
+    return `${padding} align-top text-right tabular-nums whitespace-nowrap text-slate-700 ${compact ? "w-[34%]" : ""}`;
+  }
+  return `${padding} align-top text-left text-slate-700 ${compact ? "w-[66%] min-w-0 break-words" : "break-words"}`;
+}
+
+function columnHeaderClass(column: string, compact: boolean) {
+  const numeric = isNumericColumn(column);
+  const padding = compact ? "px-3 py-2.5" : "px-2 py-2";
+  if (numeric) {
+    return `${padding} border-b border-red-100 text-[11px] font-semibold tracking-wide text-slate-600 ${compact ? "w-[34%]" : ""}`;
+  }
+  return `${padding} border-b border-red-100 text-[11px] font-semibold tracking-wide text-slate-600 ${compact ? "w-[66%] min-w-0" : ""}`;
+}
 
 type DataTableProps = {
   rows: Record<string, unknown>[];
@@ -10,8 +48,14 @@ type DataTableProps = {
   showIndex?: boolean;
   showSelection?: boolean;
   enableSorting?: boolean;
+  sortableLargeDataset?: boolean;
+  virtualize?: boolean;
+  compact?: boolean;
   maxHeightClassName?: string;
   visibleColumns?: string[];
+  exportFileName?: string;
+  toolbarPrefix?: ReactNode;
+  indexHeaderLabel?: string;
   onRowClick?: (row: Record<string, unknown>) => void;
   rowSelection?: {
     rowKey: string;
@@ -27,8 +71,14 @@ export function DataTable({
   showIndex = true,
   showSelection = true,
   enableSorting = true,
+  sortableLargeDataset = false,
+  virtualize = true,
+  compact = false,
   maxHeightClassName = "max-h-[50vh]",
   visibleColumns,
+  exportFileName = "ran_table_export",
+  toolbarPrefix,
+  indexHeaderLabel = "#",
   onRowClick,
   rowSelection,
 }: DataTableProps) {
@@ -38,6 +88,7 @@ export function DataTable({
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [localSelectedKeys, setLocalSelectedKeys] = useState<string[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -63,9 +114,21 @@ export function DataTable({
     );
   }, [rows, columns, debouncedSiteQuery]);
 
+  const labelFor = (column: string) => columnLabel(filters.language, column);
+
   const renderCell = (column: string, value: unknown, row: Record<string, unknown>) => {
     const text = String(value ?? "");
     const normalizedColumn = column.toLowerCase();
+    const translatedValue = cellValueLabel(filters.language, column, value);
+    const displayText = translatedValue ?? formatParsedFieldValue(filters.language, value);
+
+    if (
+      isParsedMissingValue(value) &&
+      ["serial_number", "product_code", "product_name", "site_name", "ip_address", "sw_version"].includes(normalizedColumn)
+    ) {
+      return <span className="italic text-slate-400">{displayText}</span>;
+    }
+
     if (normalizedColumn.includes("site_state")) {
       const normalizedValue = text.toLowerCase();
       const isActive = normalizedValue === "active";
@@ -74,7 +137,7 @@ export function DataTable({
         return (
           <span className="inline-flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-red-500"}`} />
-            <span>{text}</span>
+            <span>{displayText}</span>
           </span>
         );
       }
@@ -103,20 +166,31 @@ export function DataTable({
       );
     }
 
-    if (["interpretation", "priority", "status", "trend"].includes(normalizedColumn)) {
-      const normalizedValue = text.toLowerCase();
+    if (normalizedColumn === "change_type") {
+      const normalizedValue = text.toUpperCase();
       const badgeClass =
-        normalizedValue === "improvement" || normalizedValue === "up" || normalizedValue === "ok"
+        normalizedValue === "ADDED"
           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-          : normalizedValue === "degradation" || normalizedValue === "down" || normalizedValue === "critical"
+          : normalizedValue === "REMOVED"
             ? "border-red-200 bg-red-50 text-red-700"
-            : normalizedValue === "warning" || normalizedValue === "high" || normalizedValue === "medium"
-              ? "border-amber-200 bg-amber-50 text-amber-700"
-              : "border-slate-200 bg-slate-50 text-slate-700";
-      return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{text}</span>;
+            : "border-slate-200 bg-slate-50 text-slate-700";
+      return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{displayText}</span>;
     }
 
-    return text;
+    if (["interpretation", "priority", "status", "trend", "severity", "risk_level"].includes(normalizedColumn)) {
+      const normalizedValue = text.toLowerCase();
+      const badgeClass =
+        normalizedValue === "improvement" || normalizedValue === "up" || normalizedValue === "ok" || normalizedValue === "low"
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : normalizedValue === "degradation" || normalizedValue === "down" || normalizedValue === "critical" || normalizedValue === "high"
+            ? "border-red-200 bg-red-50 text-red-700"
+            : normalizedValue === "warning" || normalizedValue === "medium"
+              ? "border-amber-200 bg-amber-50 text-amber-700"
+              : "border-slate-200 bg-slate-50 text-slate-700";
+      return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{displayText}</span>;
+    }
+
+    return displayText;
   };
 
   const rowClassName = (row: Record<string, unknown>) => {
@@ -140,25 +214,13 @@ export function DataTable({
     return "border-b border-red-50 bg-white hover:bg-red-50/40";
   };
 
-  const canSort = enableSorting && filteredRows.length <= 3000;
+  const canSort = enableSorting && (sortableLargeDataset || filteredRows.length <= 3000);
 
   const sortedRows = useMemo(() => {
-    if (!canSort || !sortColumn) {
+    if (!canSort) {
       return filteredRows;
     }
-    const direction = sortDirection === "asc" ? 1 : -1;
-    return [...filteredRows].sort((a, b) => {
-      const aValue = a[sortColumn];
-      const bValue = b[sortColumn];
-      const aNumber = Number(aValue);
-      const bNumber = Number(bValue);
-      const bothNumbers = Number.isFinite(aNumber) && Number.isFinite(bNumber);
-
-      if (bothNumbers) {
-        return (aNumber - bNumber) * direction;
-      }
-      return String(aValue ?? "").localeCompare(String(bValue ?? ""), undefined, { sensitivity: "base" }) * direction;
-    });
+    return sortTableRows(filteredRows, sortColumn, sortDirection);
   }, [filteredRows, sortColumn, sortDirection, canSort]);
 
   const fallbackRowKey = useMemo(() => {
@@ -177,15 +239,63 @@ export function DataTable({
             if (!key) return;
             setLocalSelectedKeys((prev) => (checked ? (prev.includes(key) ? prev : [...prev, key]) : prev.filter((item) => item !== key)));
           },
-          headerLabel: filters.language === "Français" ? "Choix" : "Select",
+          headerLabel: t(filters.language, "table_select"),
         }
     : null;
 
   const exportRows = sortedRows;
   const mergedSelectionIndex = Boolean(effectiveRowSelection && showIndex);
   const selectionHeaderLabel =
-    effectiveRowSelection?.headerLabel ??
-    (filters.language === "Français" ? "Choix" : "Select");
+    effectiveRowSelection?.headerLabel ?? t(filters.language, "table_select");
+
+  const useVirtualRows = virtualize && sortedRows.length >= VIRTUALIZE_THRESHOLD;
+  const rowVirtualizer = useVirtualizer({
+    count: sortedRows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => VIRTUAL_ROW_HEIGHT,
+    overscan: 12,
+  });
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const paddingTop = useVirtualRows && virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom =
+    useVirtualRows && virtualItems.length > 0
+      ? rowVirtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
+      : 0;
+  const colSpan =
+    columns.length + (effectiveRowSelection ? 1 : 0) + (showIndex && !mergedSelectionIndex ? 1 : 0);
+
+  const renderDataRow = (row: Record<string, unknown>, idx: number) => (
+    <tr
+      key={`${idx}-${String(row[fallbackRowKey] ?? idx)}`}
+      className={`${rowClassName(row)} ${onRowClick ? "cursor-pointer" : ""}`}
+      onClick={() => onRowClick?.(row)}
+    >
+      {effectiveRowSelection ? (
+        <td className="px-2 py-1.5 align-top">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-red-600"
+              checked={effectiveRowSelection.selectedKeys.includes(String(row[effectiveRowSelection.rowKey] ?? ""))}
+              onChange={(event) => effectiveRowSelection.onToggle(String(row[effectiveRowSelection.rowKey] ?? ""), event.target.checked)}
+              onClick={(event) => event.stopPropagation()}
+            />
+            {mergedSelectionIndex ? (
+              <span className="inline-block min-w-[18px] font-semibold text-red-700">{idx + 1}</span>
+            ) : null}
+          </div>
+        </td>
+      ) : null}
+      {showIndex && !mergedSelectionIndex ? (
+        <td className="whitespace-nowrap px-2 py-1.5 align-top font-semibold text-red-700">{idx + 1}</td>
+      ) : null}
+      {columns.map((column) => (
+        <td key={`${idx}-${column}`} className={columnCellClass(column, compact)}>
+          {renderCell(column, row[column], row)}
+        </td>
+      ))}
+    </tr>
+  );
 
   const downloadFile = (content: string, filename: string, mimeType: string) => {
     const blob = new Blob([content], { type: mimeType });
@@ -199,8 +309,18 @@ export function DataTable({
     URL.revokeObjectURL(url);
   };
 
+  const buildExportName = (extension: string) => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const safeBase = exportFileName
+      .trim()
+      .replace(/[^\w\-]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    return `${safeBase || "ran_table_export"}_${stamp}.${extension}`;
+  };
+
   const exportCsv = () => {
-    const headers = showIndex ? ["#", ...columns] : columns;
+    const headers = showIndex ? [indexHeaderLabel, ...columns.map(labelFor)] : columns.map(labelFor);
     const escapeCsv = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const csvLines = [headers.map(escapeCsv).join(",")];
     exportRows.forEach((row, idx) => {
@@ -208,11 +328,13 @@ export function DataTable({
       const line = values.map(escapeCsv).join(",");
       csvLines.push(line);
     });
-    downloadFile(csvLines.join("\n"), "table-export.csv", "text/csv;charset=utf-8;");
+    downloadFile(csvLines.join("\n"), buildExportName("csv"), "text/csv;charset=utf-8;");
   };
 
   const exportExcel = () => {
-    const headerCells = (showIndex ? ["#", ...columns] : columns).map((column) => `<th>${String(column)}</th>`).join("");
+    const headerCells = (showIndex ? [indexHeaderLabel, ...columns.map(labelFor)] : columns.map(labelFor))
+      .map((column) => `<th>${String(column)}</th>`)
+      .join("");
     const bodyRows = exportRows
       .map((row, idx) => {
         const rowCells = showIndex
@@ -233,7 +355,7 @@ export function DataTable({
         </body>
       </html>
     `.trim();
-    downloadFile(html, "table-export.xls", "application/vnd.ms-excel;charset=utf-8;");
+    downloadFile(html, buildExportName("xls"), "application/vnd.ms-excel;charset=utf-8;");
   };
 
   if (!rows.length) {
@@ -241,65 +363,56 @@ export function DataTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-red-100 bg-white shadow-[0_8px_24px_rgba(220,38,38,0.08)]">
+    <div className="platform-surface">
       {showControls ? (
-        <div className="border-b border-red-100 bg-gradient-to-r from-red-50 to-white px-3 py-2">
-          <div className="grid grid-cols-1 gap-2">
+        <div className="platform-surface-header px-3 py-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {toolbarPrefix}
             <input
               value={siteQuery}
               onChange={(event) => setSiteQuery(event.target.value)}
-              placeholder={filters.language === "Français" ? "Recherche" : "Search"}
-              className="h-8 rounded-xl border border-red-100 bg-white px-2.5 text-xs text-slate-700 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              placeholder={t(filters.language, "table_search")}
+              className="h-8 min-w-0 flex-1 rounded-xl border border-red-100 bg-white px-2.5 text-xs text-slate-700 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
             />
           </div>
         </div>
       ) : null}
-      <div className={`${maxHeightClassName} overflow-auto`}>
-        <table className="w-full min-w-[920px] text-left text-xs">
-          <thead className="sticky top-0 bg-red-50/80 backdrop-blur">
+      <div ref={scrollRef} className={`${maxHeightClassName} overflow-auto`}>
+        <table
+          className={`w-full text-left text-xs ${compact ? "min-w-0 table-fixed" : "min-w-[920px] table-auto"}`}
+        >
+          <thead className="sticky top-0 bg-teal-50/80 backdrop-blur">
             <tr>
               {effectiveRowSelection ? (
-                <th className="whitespace-nowrap border-b border-red-100 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                <th className="whitespace-nowrap border-b border-red-100 px-2 py-2 text-[11px] font-semibold tracking-wide text-slate-600">
                   {selectionHeaderLabel}
                 </th>
               ) : null}
               {showIndex && !mergedSelectionIndex ? (
-                <th className="whitespace-nowrap border-b border-red-100 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                  #
+                <th className="whitespace-nowrap border-b border-red-100 px-2.5 py-2 text-[11px] font-semibold tracking-wide text-slate-600">
+                  {indexHeaderLabel}
                 </th>
               ) : null}
               {columns.map((column) => (
-                <th
-                  key={column}
-                  className="border-b border-red-100 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span>{column}</span>
+                <th key={column} className={columnHeaderClass(column, compact)}>
+                  <div
+                    className={`flex items-center gap-2 ${isNumericColumn(column) ? "justify-end" : "justify-between"}`}
+                  >
+                    <span className={compact && !isNumericColumn(column) ? "truncate" : ""}>{labelFor(column)}</span>
                     {canSort ? (
-                      <span className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSortColumn(column);
-                            setSortDirection("asc");
-                          }}
-                          className={`rounded px-1 text-[10px] ${sortColumn === column && sortDirection === "asc" ? "bg-red-600 text-white" : "text-slate-500 hover:text-red-600"}`}
-                          aria-label={`Sort ${column} ascending`}
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSortColumn(column);
-                            setSortDirection("desc");
-                          }}
-                          className={`rounded px-1 text-[10px] ${sortColumn === column && sortDirection === "desc" ? "bg-red-600 text-white" : "text-slate-500 hover:text-red-600"}`}
-                          aria-label={`Sort ${column} descending`}
-                        >
-                          ▼
-                        </button>
-                      </span>
+                      <TableSortIcons
+                        active={sortColumn === column}
+                        direction={sortDirection}
+                        columnLabel={labelFor(column)}
+                        onAsc={() => {
+                          setSortColumn(column);
+                          setSortDirection("asc");
+                        }}
+                        onDesc={() => {
+                          setSortColumn(column);
+                          setSortDirection("desc");
+                        }}
+                      />
                     ) : null}
                   </div>
                 </th>
@@ -307,38 +420,19 @@ export function DataTable({
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((row, idx) => (
-              <tr
-                key={idx}
-                className={`${rowClassName(row)} ${onRowClick ? "cursor-pointer" : ""}`}
-                onClick={() => onRowClick?.(row)}
-              >
-                {effectiveRowSelection ? (
-                  <td className="px-2 py-1.5 align-top">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5 accent-red-600"
-                        checked={effectiveRowSelection.selectedKeys.includes(String(row[effectiveRowSelection.rowKey] ?? ""))}
-                        onChange={(event) => effectiveRowSelection.onToggle(String(row[effectiveRowSelection.rowKey] ?? ""), event.target.checked)}
-                        onClick={(event) => event.stopPropagation()}
-                      />
-                      {mergedSelectionIndex ? (
-                        <span className="inline-block min-w-[18px] font-semibold text-red-700">{idx + 1}</span>
-                      ) : null}
-                    </div>
-                  </td>
-                ) : null}
-                {showIndex && !mergedSelectionIndex ? (
-                  <td className="whitespace-nowrap px-2 py-1.5 align-top font-semibold text-red-700">{idx + 1}</td>
-                ) : null}
-                {columns.map((column) => (
-                  <td key={`${idx}-${column}`} className="break-words px-2 py-1.5 align-top text-slate-700">
-                    {renderCell(column, row[column], row)}
-                  </td>
-                ))}
+            {useVirtualRows && paddingTop > 0 ? (
+              <tr>
+                <td colSpan={colSpan} style={{ height: paddingTop, padding: 0, border: 0 }} />
               </tr>
-            ))}
+            ) : null}
+            {useVirtualRows
+              ? virtualItems.map((virtualRow) => renderDataRow(sortedRows[virtualRow.index], virtualRow.index))
+              : sortedRows.map((row, idx) => renderDataRow(row, idx))}
+            {useVirtualRows && paddingBottom > 0 ? (
+              <tr>
+                <td colSpan={colSpan} style={{ height: paddingBottom, padding: 0, border: 0 }} />
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
@@ -352,14 +446,14 @@ export function DataTable({
             onClick={exportCsv}
             className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50"
           >
-            Export CSV
+            {t(filters.language, "export_csv")}
           </button>
           <button
             type="button"
             onClick={exportExcel}
             className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50"
           >
-            Export Excel
+            {t(filters.language, "export_excel")}
           </button>
         </div>
       </div>

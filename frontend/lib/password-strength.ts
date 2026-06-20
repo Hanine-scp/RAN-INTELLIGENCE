@@ -1,3 +1,6 @@
+import type { Locale } from "@/lib/i18n";
+import { authT } from "@/lib/auth-i18n";
+
 export type PasswordStrength = "empty" | "weak" | "medium" | "strong";
 
 export type PasswordRules = {
@@ -33,12 +36,12 @@ export function isPasswordValid(password: string): boolean {
   return rules.minLength && rules.uppercase && rules.special && rules.digit;
 }
 
-export function passwordValidationMessage(password: string): string | null {
+export function passwordValidationMessage(password: string, locale: Locale = "Français"): string | null {
   const rules = getPasswordRules(password);
-  if (!rules.minLength) return "Minimum 10 caractères requis.";
-  if (!rules.uppercase) return "Ajoutez au moins une lettre majuscule (A-Z).";
-  if (!rules.special) return "Ajoutez un caractère spécial (* / ! @ # …).";
-  if (!rules.digit) return "Ajoutez au moins un chiffre.";
+  if (!rules.minLength) return authT(locale, "auth_pwd_min_length");
+  if (!rules.uppercase) return authT(locale, "auth_pwd_uppercase");
+  if (!rules.special) return authT(locale, "auth_pwd_special");
+  if (!rules.digit) return authT(locale, "auth_pwd_digit");
   return null;
 }
 

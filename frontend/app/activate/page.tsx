@@ -2,17 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  AuthAlert,
-  AuthField,
-  AuthLayout,
-  AuthLink,
-  AuthPrimaryButton,
-} from "@/components/auth-layout";
+import { AuthAlert, AuthField, AuthLayout, AuthLink, AuthPrimaryButton } from "@/components/auth-layout";
 import { activateUserAccount } from "@/lib/api";
+import { useLocale } from "@/lib/use-locale";
 
 export default function ActivatePage() {
   const router = useRouter();
+  const { ta } = useLocale();
   const [email, setEmail] = useState("");
   const [emailCode, setEmailCode] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
@@ -30,7 +26,7 @@ export default function ActivatePage() {
       setSuccess(data.message);
       window.setTimeout(() => router.replace("/login"), 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Activation refusée");
+      setError(err instanceof Error ? err.message : ta("auth_err_activate_failed"));
     } finally {
       setLoading(false);
     }
@@ -38,11 +34,11 @@ export default function ActivatePage() {
 
   return (
     <AuthLayout
-      formTitle="Activate"
-      formSubtitle="Finalisez votre accès — codes email & SMS requis"
+      formTitle={ta("auth_activate")}
+      formSubtitle={ta("auth_sub_activate")}
       footer={
         <>
-          Déjà activé ? <AuthLink href="/login">Login</AuthLink>
+          {ta("auth_already_active")} <AuthLink href="/login">{ta("auth_login")}</AuthLink>
         </>
       }
     >
@@ -50,11 +46,30 @@ export default function ActivatePage() {
       {success ? <AuthAlert tone="success">{success}</AuthAlert> : null}
 
       <form onSubmit={onSubmit} className="space-y-3">
-        <AuthField label="Username" type="email" value={email} onChange={setEmail} placeholder="prenom.nom@ooredoo.tn" icon="user" />
-        <AuthField label="Email Code" value={emailCode} onChange={setEmailCode} icon="mail" placeholder="OTP email" />
-        <AuthField label="SMS Code" value={phoneCode} onChange={setPhoneCode} icon="phone" placeholder="OTP SMS" />
+        <AuthField
+          label={ta("auth_email")}
+          type="email"
+          value={email}
+          onChange={setEmail}
+          placeholder={ta("auth_placeholder_forgot_email")}
+          icon="user"
+        />
+        <AuthField
+          label={ta("auth_email_code")}
+          value={emailCode}
+          onChange={setEmailCode}
+          icon="mail"
+          placeholder={ta("auth_placeholder_email_otp_short")}
+        />
+        <AuthField
+          label={ta("auth_sms_code")}
+          value={phoneCode}
+          onChange={setPhoneCode}
+          icon="phone"
+          placeholder={ta("auth_placeholder_sms_otp")}
+        />
 
-        <AuthPrimaryButton disabled={loading}>{loading ? "..." : "Activate"}</AuthPrimaryButton>
+        <AuthPrimaryButton disabled={loading}>{loading ? "..." : ta("auth_activate")}</AuthPrimaryButton>
       </form>
     </AuthLayout>
   );

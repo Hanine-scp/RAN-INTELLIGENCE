@@ -69,6 +69,27 @@ Initialiser le schéma + compte admin :
 python scripts/init_auth_database.py
 ```
 
+### Créer le premier admin (email + SMS, style Google)
+
+1. Dans `.env.auth` :
+
+```env
+SEED_DEFAULT_ADMIN=false
+ADMIN_BOOTSTRAP_KEY=votre-cle-secrete-bootstrap
+```
+
+2. Purger la base si besoin :
+
+```powershell
+python scripts/reset_auth_database.py --no-seed
+```
+
+3. Ouvrir http://localhost:3000/admin/setup — saisir **votre** email, téléphone, mot de passe et la clé bootstrap.
+
+4. Vérifier les codes reçus par **email** et **SMS**, puis activer le compte.
+
+5. Connexion admin : onglet **Admin** sur `/login` — email + mot de passe, puis double OTP email + SMS à chaque session.
+
 Redémarrer l'API :
 
 ```powershell

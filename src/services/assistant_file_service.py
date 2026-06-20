@@ -347,6 +347,155 @@ def analyze_uploaded_file(filename: str, content: bytes, vendor: str = "nokia") 
     }
 
 
+_IDENTITY_MARKERS = (
+    "l'assistant ia intégré à la plateforme",
+    "the ai assistant embedded in the ran",
+    "mon rôle : vous accompagner",
+    "my role is to provide",
+    "je suis **ran guardian copilot**",
+    "i'm **ran guardian copilot**",
+    "je suis **guardian copilot**",
+    "i'm **guardian copilot**",
+    "le copilot ia de la suite",
+    "the ai copilot of the",
+)
+
+
+def _is_boilerplate_intro(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _IDENTITY_MARKERS)
+
+
+def _local_web_insight(
+    ctx: FilterContext,
+    question: str,
+    web_payload: dict[str, Any],
+) -> dict[str, Any]:
+    fr = (ctx.language or "Français").startswith("Fr")
+    corrected = str(web_payload.get("corrected_query") or web_payload.get("search_query") or question).strip()
+    topic = corrected or question.strip()
+    abstract = str(web_payload.get("abstract") or "").strip()
+    original = str(web_payload.get("query") or question).strip()
+    results = web_payload.get("results") or []
+
+    bullets: list[str] = []
+    for index, row in enumerate(results[:4], start=1):
+        snippet = str(row.get("snippet") or row.get("title") or "").strip()
+        if snippet:
+            bullets.append(f"- **[{index}]** {snippet[:180]}")
+
+    if fr:
+        parts = [f"## Résumé\n{abstract or f'Synthèse sur **{topic}** d’après les sources consultées.'}"]
+        if bullets:
+            parts.append("## Points clés\n" + "\n".join(bullets))
+        if corrected and corrected.lower() != original.lower():
+            parts.append(f"*Requête corrigée : {corrected}*")
+        parts.append("Les sources vérifiables sont listées ci-dessous.")
+    else:
+        parts = [f"## Summary\n{abstract or f'Summary about **{topic}** from consulted sources.'}"]
+        if bullets:
+            parts.append("## Key points\n" + "\n".join(bullets))
+        if corrected and corrected.lower() != original.lower():
+            parts.append(f"*Corrected query: {corrected}*")
+        parts.append("Verifiable sources are listed below.")
+
+    return {
+        "intent": "web_enriched",
+        "message": "\n\n".join(parts),
+        "rows": [],
+        "details": [],
+        "sources": [{"type": "web", **row} for row in results],
+        "ai_engine": "web_local",
+    }
+
+
+def _web_no_results_insight(ctx: FilterContext, question: str, web_payload: dict[str, Any]) -> dict[str, Any]:
+    fr = (ctx.language or "Français").startswith("Fr")
+    corrected = str(web_payload.get("corrected_query") or web_payload.get("search_query") or question).strip()
+    message = (
+        f"Aucune source web fiable trouvée pour « {question} »."
+        + (f"\n\nRequête reformulée : **{corrected}**." if corrected and corrected != question else "")
+        + "\n\nEssayez des termes plus précis (ex. RAN, LTE, Nokia) ou élargissez la période dans les filtres."
+        if fr
+        else (
+            f"No reliable web source found for “{question}”."
+            + (f"\n\nRephrased query: **{corrected}**." if corrected and corrected != question else "")
+            + "\n\nTry more specific terms (e.g. RAN, LTE, Nokia) or widen the sidebar filters."
+        )
+    )
+    return {
+        "intent": "web_enriched",
+        "message": message,
+        "rows": [],
+        "details": [],
+        "sources": [],
+        "ai_engine": "web_local",
+    }
+
+
+def _resolve_web_research_insight(
+    ctx: FilterContext,
+    question: str,
+    history: list[dict[str, Any]] | None,
+    web_payload: dict[str, Any] | None,
+    web_context: str,
+) -> dict[str, Any]:
+    if not web_payload:
+        fr = (ctx.language or "Français").startswith("Fr")
+        return {
+            "intent": "web_enriched",
+            "message": "Recherche web indisponible." if fr else "Web search unavailable.",
+            "rows": [],
+            "details": [],
+            "sources": [],
+            "ai_engine": "web_local",
+        }
+
+    if web_payload.get("status") != "ok":
+        return _web_no_results_insight(ctx, question, web_payload)
+
+    if openai_agent_service.is_enabled() and web_context.strip():
+        premium = openai_agent_service.run(ctx, question, history, web_context=web_context)
+        if premium and not premium.get("fallback"):
+            message = str(premium.get("message") or "").strip()
+            if message and not _is_boilerplate_intro(message):
+                premium["intent"] = "web_enriched"
+                return premium
+
+    return _local_web_insight(ctx, question, web_payload)
+
+
+def _resolve_standard_insight(
+    ctx: FilterContext,
+    question: str,
+    history: list[dict[str, Any]] | None,
+    web_context: str,
+) -> dict[str, Any]:
+    from src.services.assistant_intelligence_service import assistant_intelligence_service
+
+    if openai_agent_service.is_enabled():
+        premium = openai_agent_service.run(ctx, question, history, web_context=web_context)
+        if premium and not premium.get("fallback"):
+            message = str(premium.get("message") or "").strip()
+            if message and not _is_boilerplate_intro(message):
+                return premium
+
+    return assistant_intelligence_service.compose(ctx, question, history)
+
+
+def _resolve_lake_insight(
+    ctx: FilterContext,
+    question: str,
+    history: list[dict[str, Any]] | None,
+    web_search: bool,
+    web_payload: dict[str, Any] | None,
+    web_context: str,
+) -> dict[str, Any]:
+    if web_search:
+        return _resolve_web_research_insight(ctx, question, history, web_payload, web_context)
+    return _resolve_standard_insight(ctx, question, history, web_context)
+
+
 class AssistantFileService:
     def build_insight(
         self,
@@ -379,43 +528,58 @@ class AssistantFileService:
         if not q:
             q = "Analyse détaillée des fichiers joints avec focus qualité réseau."
 
+        from src.services.assistant_intelligence_service import should_auto_web_search
+
+        effective_web = web_search or should_auto_web_search(q)
+
+        web_payload: dict[str, Any] | None = None
+        web_block = ""
+        web_sources: list[dict[str, Any]] = []
+        if effective_web:
+            web_payload = web_search_service.search(q, language=ctx.language)
+            web_block = web_search_service.format_for_assistant(web_payload, language=ctx.language)
+            web_sources = [{"type": "web", **row} for row in web_payload.get("results") or []]
+
         enriched_question = q
         if file_messages:
             enriched_question = f"{q}\n\n**Fichiers analysés :**\n" + "\n\n---\n\n".join(file_messages[:3])
 
-        if openai_agent_service.is_enabled():
-            premium = openai_agent_service.run(ctx, enriched_question, history)
-            lake_insight = (
-                premium
-                if premium and not premium.get("fallback")
-                else assistant_intelligence_service.compose(ctx, q, history)
-            )
-        else:
-            lake_insight = assistant_intelligence_service.compose(ctx, q, history)
+        web_context = ""
+        if effective_web and web_payload and web_payload.get("status") == "ok" and web_block:
+            web_context = web_block
+
+        lake_insight = _resolve_lake_insight(
+            ctx,
+            enriched_question,
+            history,
+            effective_web,
+            web_payload,
+            web_context,
+        )
 
         combined_message = ""
-        if file_messages and lake_insight.get("ai_engine") != "openai":
-            combined_message = "\n\n---\n\n".join(file_messages)
-
-        web_sources: list[dict[str, Any]] = []
-        if web_search:
-            web_payload = web_search_service.search(q)
-            web_block = web_search_service.format_for_assistant(web_payload, language=ctx.language)
-            if web_block:
-                combined_message = f"{combined_message}\n\n---\n\n{web_block}" if combined_message else web_block
-            web_sources = [{"type": "web", **row} for row in web_payload.get("results") or []]
+        file_block = "\n\n---\n\n".join(file_messages[:3]) if file_messages else ""
 
         lake_msg = str(lake_insight.get("message") or "")
-        if lake_insight.get("ai_engine") == "openai":
+        if lake_insight.get("ai_engine") in {"openai", "web_local"}:
             combined_message = lake_msg
+            if file_block:
+                combined_message = f"{file_block}\n\n---\n\n{lake_msg}" if lake_msg else file_block
+            if effective_web and web_payload and web_payload.get("status") == "no_results":
+                note = (
+                    "\n\n---\n\n*Aucun résultat web complémentaire trouvé pour cette requête.*"
+                    if ctx.language == "Français"
+                    else "\n\n---\n\n*No additional web results found for this query.*"
+                )
+                combined_message = f"{lake_msg}{note}" if lake_msg else note.strip()
         elif lake_msg and lake_insight.get("intent") not in {"discovery", "greeting", "help", "thanks", "identity"}:
             combined_message = (
-                f"{combined_message}\n\n---\n\n**Analyse réseau (filtres actifs)**\n{lake_msg}"
-                if combined_message
+                f"{file_block}\n\n---\n\n**Analyse réseau (filtres actifs)**\n{lake_msg}"
+                if file_block
                 else lake_msg
             )
         elif not combined_message:
-            combined_message = lake_msg or "Analyse terminée."
+            combined_message = file_block or lake_msg or web_block or "Analyse terminée."
 
         merged_rows = (lake_insight.get("rows") or [])[:20] + all_rows[:30]
         merged_details = (lake_insight.get("details") or []) + all_details
@@ -423,8 +587,11 @@ class AssistantFileService:
         intent = lake_insight.get("intent", "discovery")
         if files:
             intent = "file_analysis"
-        if web_search:
-            intent = "web_enriched" if intent == "discovery" else f"{intent}+web"
+        if effective_web:
+            if intent in {"discovery", "web_enriched"}:
+                intent = "web_enriched"
+            elif "+web" not in str(intent):
+                intent = f"{intent}+web"
 
         return {
             "intent": intent,
@@ -433,7 +600,8 @@ class AssistantFileService:
             "rows": merged_rows,
             "details": merged_details,
             "sources": sources + web_sources + (lake_insight.get("sources") or []),
-            "web_search_enabled": web_search,
+            "web_search_enabled": effective_web,
+            "web_search_meta": web_search_service.build_meta(web_payload) if effective_web else None,
             "file_reports": reports,
             "suggested_questions": lake_insight.get("suggested_questions") or [],
             "sql_guardrails": lake_insight.get("sql_guardrails"),

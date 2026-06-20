@@ -1,36 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { getDashboard } from "@/lib/api";
+import { useMemo } from "react";
 import { useAppContext } from "@/components/app-provider";
+import { HomePageLayout } from "@/components/home-page-layout";
 import { t } from "@/lib/i18n";
+import { useDashboard } from "@/lib/use-dashboard";
 import { MultiBarChart, SummaryLineChart } from "@/components/charts";
+import { CHART_PRIMARY, CHART_RING_TRACK, CHART_SECONDARY, TECH_COLORS } from "@/lib/chart-theme";
 
 export default function Home() {
   const { filters, payload } = useAppContext();
-  const [data, setData] = useState<{
-    period: { latest_date: string; oldest_date: string; snapshot_count: number };
-    kpis: Record<string, number>;
-    summary: Record<string, unknown>[];
-    equipment_summary: Record<string, unknown>[];
-  } | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const load = async () => {
-      if (!payload.selected_dates.length && !payload.effective_dates?.length) {
-        return;
-      }
-      setLoading(true);
-      try {
-        const response = await getDashboard(payload);
-        setData(response);
-      } finally {
-        setLoading(false);
-      }
-    };
-    void load();
-  }, [payload]);
+  const { data, isLoading, isValidating } = useDashboard(payload);
+  const loading = isLoading || isValidating;
 
   const kpiGraph = useMemo(() => {
     if (!data) {
@@ -100,7 +81,7 @@ export default function Home() {
         { label: "5G", value: 0 },
       ];
     }
-    const last = cellsChartData[cellsChartData.length - 1];
+    const last = cellsChartData[cellsChartData.length - 1] as Record<string, unknown>;
     const toNumber = (value: unknown) => {
       const num = Number(value);
       return Number.isFinite(num) ? num : 0;
@@ -108,7 +89,13 @@ export default function Home() {
     return [
       { label: "2G", value: toNumber(last.cells_2g) },
       { label: "3G", value: toNumber(last.cells_3g) },
-      { label: "4G (Total)", value: toNumber(last.cells_4g_fdd) + toNumber(last.cells_4g_tdd) },
+      {
+        label: "4G (Total)",
+        value:
+          toNumber(last.cells_4g_fdd) + toNumber(last.cells_4g_tdd) > 0
+            ? toNumber(last.cells_4g_fdd) + toNumber(last.cells_4g_tdd)
+            : toNumber(last.cells_4g),
+      },
       { label: "4G FDD", value: toNumber(last.cells_4g_fdd) },
       { label: "4G TDD", value: toNumber(last.cells_4g_tdd) },
       { label: "5G", value: toNumber(last.cells_5g) },
@@ -163,40 +150,54 @@ export default function Home() {
   }
 
   return (
-    <div className="space-y-3">
-      {loading || !data ? <p className="text-sm text-zinc-500">{t(filters.language, "loading")}</p> : null}
+    <HomePageLayout
+      dashboard={
+        <>
+          {loading || !data ? <p className="text-sm text-zinc-500">{t(filters.language, "loading")}</p> : null}
 
-      {data ? (
-        <section className="rounded-2xl border border-red-100 bg-white p-3 shadow-[0_12px_30px_rgba(220,38,38,0.08)]">
-          <div className="grid grid-cols-1 gap-2 xl:grid-cols-12">
-            <article className="rounded-xl border border-red-100 bg-red-50/40 p-3 xl:col-span-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-red-700">{filters.language === "Français" ? "Sites réseau" : "Network sites"}</p>
+          {data ? (
+            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+              <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-platform-navy">
+                    {filters.language === "Français" ? "Tableau de bord exécutif" : "Executive dashboard"}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {filters.language === "Français"
+                      ? "KPIs réseau, évolution et couverture technologique"
+                      : "Network KPIs, evolution and technology coverage"}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-12">
+            <article className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-teal-50/40 p-3 xl:col-span-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-platform-navy">{filters.language === "Français" ? "Sites réseau" : "Network sites"}</p>
               <p className="mt-1 text-3xl font-extrabold leading-none text-slate-900">{kpiGraph.sites}</p>
               <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] font-semibold">
-                <div className="rounded-lg border border-red-200 bg-white px-2 py-1 text-slate-700">
-                  {filters.language === "Français" ? "Actifs" : "Active"} <span className="ml-1 text-red-700">{kpiGraph.active}</span>
+                <div className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-slate-700">
+                  {filters.language === "Français" ? "Actifs" : "Active"} <span className="ml-1 text-[#1ABC9C]">{kpiGraph.active}</span>
                 </div>
-                <div className="rounded-lg border border-red-200 bg-white px-2 py-1 text-slate-700">
-                  {filters.language === "Français" ? "Bloqués" : "Blocked"} <span className="ml-1 text-red-700">{kpiGraph.blocked}</span>
+                <div className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-slate-700">
+                  {filters.language === "Français" ? "Bloqués" : "Blocked"} <span className="ml-1 text-[#E74C3C]">{kpiGraph.blocked}</span>
                 </div>
               </div>
             </article>
 
-            <article className="rounded-xl border border-red-100 bg-white p-3 xl:col-span-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-red-700">{filters.language === "Français" ? "Disponibilité" : "Availability"}</p>
+            <article className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-platform-navy">{filters.language === "Français" ? "Disponibilité" : "Availability"}</p>
               <p className="mt-1 text-3xl font-extrabold leading-none text-slate-900">{kpiGraph.availability}%</p>
-              <p className={`mt-2 text-[11px] font-semibold ${overview.availabilityDelta >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <p className={`mt-2 text-[11px] font-semibold ${overview.availabilityDelta >= 0 ? "text-[#1ABC9C]" : "text-[#E74C3C]"}`}>
                 {overview.availabilityDelta >= 0 ? "+" : ""}
                 {overview.availabilityDelta}% {filters.language === "Français" ? "vs snapshot précédent" : "vs previous snapshot"}
               </p>
             </article>
 
-            <article className="rounded-xl border border-red-100 bg-white p-3 xl:col-span-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-red-700">{filters.language === "Français" ? "Santé réseau" : "Network health"}</p>
+            <article className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-platform-navy">{filters.language === "Français" ? "Santé réseau" : "Network health"}</p>
               <div className="mt-2 flex items-center gap-3">
                 <div
                   className="relative h-14 w-14 rounded-full"
-                  style={{ background: `conic-gradient(#dc2626 ${kpiGraph.availability}%, #fee2e2 0)` }}
+                  style={{ background: `conic-gradient(${CHART_PRIMARY} ${kpiGraph.availability}%, ${CHART_RING_TRACK} 0)` }}
                 >
                   <div className="absolute inset-[6px] rounded-full bg-white" />
                 </div>
@@ -207,42 +208,42 @@ export default function Home() {
               </div>
             </article>
 
-            <article className="rounded-xl border border-red-100 bg-white p-3 xl:col-span-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+            <article className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-platform-navy">
                 {filters.language === "Français" ? "Équipements / site" : "Equipment / site"}
               </p>
               <p className="text-3xl font-extrabold leading-none text-slate-900">{kpiGraph.equipmentPerSite}</p>
-              <div className="mt-2 h-2 rounded-full bg-red-100">
-                <div className="h-2 rounded-full bg-red-500" style={{ width: `${kpiGraph.equipmentDensityRate}%` }} />
+              <div className="mt-2 h-2 rounded-full bg-teal-100">
+                <div className="h-2 rounded-full bg-teal-500" style={{ width: `${kpiGraph.equipmentDensityRate}%` }} />
               </div>
               <p className="mt-2 text-[11px] font-semibold text-slate-500">
                 {kpiGraph.equipment} {filters.language === "Français" ? "équipements total" : "total equipment"}
               </p>
             </article>
 
-            <article className="rounded-xl border border-red-100 bg-white p-3 xl:col-span-6">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-700">{filters.language === "Français" ? "Évolution sites" : "Sites evolution"}</p>
+            <article className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-6">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-platform-navy">{filters.language === "Français" ? "Évolution sites" : "Sites evolution"}</p>
               <SummaryLineChart data={data.summary} xKey="snapshot_date" yKey="nb_sites" height={175} framed={false} />
             </article>
 
-            <article className="rounded-xl border border-red-100 bg-white p-3 xl:col-span-6">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-700">{filters.language === "Français" ? "Actifs vs bloqués" : "Active vs blocked"}</p>
+            <article className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-6">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-platform-navy">{filters.language === "Français" ? "Actifs vs bloqués" : "Active vs blocked"}</p>
               <MultiBarChart
                 data={data.summary}
                 xKey="snapshot_date"
                 height={175}
                 framed={false}
                 bars={[
-                  { key: "active_sites", color: "#dc2626", yAxisId: "left" },
-                  { key: "blocked_sites", color: "#fca5a5", yAxisId: "right" },
+                  { key: "active_sites", color: CHART_PRIMARY, yAxisId: "left" },
+                  { key: "blocked_sites", color: CHART_SECONDARY, yAxisId: "right" },
                 ]}
               />
             </article>
 
-            <article className="rounded-xl border border-red-100 bg-white p-3 xl:col-span-12">
+            <article className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-12">
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
                 <div className="xl:col-span-8">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-platform-navy">
                     {filters.language === "Français" ? "Couverture technologique" : "Technology coverage"}
                   </p>
                   <MultiBarChart
@@ -251,34 +252,34 @@ export default function Home() {
                     height={165}
                     framed={false}
                     bars={[
-                      { key: "cells_2g", color: "#7f1d1d" },
-                      { key: "cells_3g", color: "#b91c1c" },
-                      { key: "cells_4g", color: "#ef4444" },
-                      { key: "cells_5g", color: "#fca5a5" },
+                      { key: "cells_2g", color: TECH_COLORS.cells_2g },
+                      { key: "cells_3g", color: TECH_COLORS.cells_3g },
+                      { key: "cells_4g", color: TECH_COLORS.cells_4g },
+                      { key: "cells_5g", color: TECH_COLORS.cells_5g },
                     ]}
                   />
                 </div>
-                <div className="rounded-lg border border-red-100 bg-white p-2.5 xl:col-span-4">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                <div className="rounded-lg border border-slate-200 bg-white p-2.5 xl:col-span-4">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-platform-navy">
                     {filters.language === "Français" ? "Détail des cellules (dernier snapshot)" : "Cell details (latest snapshot)"}
                   </p>
-                  <div className="overflow-hidden rounded-lg border border-red-100">
+                  <div className="overflow-hidden rounded-lg border border-slate-200">
                     <table className="w-full border-collapse text-xs">
-                      <thead className="bg-red-50/70">
+                      <thead className="bg-teal-50/70">
                         <tr>
-                          <th className="border-b border-red-100 px-2 py-1.5 text-left font-semibold text-red-700">
+                          <th className="border-b border-slate-200 px-2 py-1.5 text-left font-semibold text-platform-navy">
                             {filters.language === "Français" ? "Type cellule" : "Cell type"}
                           </th>
-                          <th className="border-b border-red-100 px-2 py-1.5 text-right font-semibold text-red-700">
+                          <th className="border-b border-slate-200 px-2 py-1.5 text-right font-semibold text-platform-navy">
                             {filters.language === "Français" ? "Valeur" : "Value"}
                           </th>
                         </tr>
                       </thead>
                       <tbody>
                         {latestCellsTable.map((row) => (
-                          <tr key={row.label} className="odd:bg-white even:bg-red-50/20">
-                            <td className="border-b border-red-100/70 px-2 py-1.5 font-semibold text-slate-700">{row.label}</td>
-                            <td className="border-b border-red-100/70 px-2 py-1.5 text-right font-bold text-slate-900">{row.value}</td>
+                          <tr key={row.label} className="odd:bg-white even:bg-slate-50/80">
+                            <td className="border-b border-slate-200/70 px-2 py-1.5 font-semibold text-slate-700">{row.label}</td>
+                            <td className="border-b border-slate-200/70 px-2 py-1.5 text-right font-bold text-slate-900">{row.value}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -287,9 +288,11 @@ export default function Home() {
                 </div>
               </div>
             </article>
-          </div>
-        </section>
-      ) : null}
-    </div>
+              </div>
+            </section>
+          ) : null}
+        </>
+      }
+    />
   );
 }

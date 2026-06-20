@@ -40,10 +40,10 @@ function MenuRow({
       onClick={onClick}
       disabled={disabled}
       className={`mx-1.5 flex w-[calc(100%-12px)] items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition disabled:cursor-wait disabled:opacity-60 ${
-        active ? "bg-red-50 text-red-700" : "text-slate-700 hover:bg-red-50 hover:text-red-700"
+        active ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-teal-50 hover:text-teal-800"
       }`}
     >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-red-600">{icon}</span>
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-teal-600">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {trailing}
     </button>
@@ -109,7 +109,7 @@ function IconChevron({ open }: { open?: boolean }) {
 
 function IconCheck() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4 text-red-600" fill="none" stroke="currentColor" strokeWidth="2.5">
+    <svg viewBox="0 0 24 24" className="h-4 w-4 text-teal-600" fill="none" stroke="currentColor" strokeWidth="2.5">
       <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -180,7 +180,7 @@ export function AiAttachMenu({
                 key={file.id}
                 type="button"
                 onClick={() => onSelectRecent(file.id)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-red-50 hover:text-red-700"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-teal-50 hover:text-teal-800"
               >
                 <span className="truncate font-medium">{file.name}</span>
                 <span className="shrink-0 text-slate-400">{(file.size / 1024).toFixed(0)} KB</span>

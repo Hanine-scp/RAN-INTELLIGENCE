@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import logging
 import os
+import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from lxml import etree
 import pandas as pd
+
+from src.parsers.cell_classification import classify_cell
+from src.parsers.parsed_values import (
+    finalize_equipment_field_values,
+    is_missing_parsed_value,
+    resolve_parsed_value,
+)
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -197,34 +208,6 @@ def infer_site_state(blocking_state: Optional[str]) -> str:
     return "active"
 
 
-def classify_cell(class_name: Optional[str]) -> Optional[str]:
-    if not class_name:
-        return None
-
-    c = str(class_name).strip()
-    c_lower = c.lower()
-
-    if c == "com.nokia.srbts.gsm:GNCEL":
-        return "2G"
-
-    if c == "com.nokia.srbts.wcdma:WNCEL":
-        return "3G"
-
-    if c == "com.nokia.srbts.nrbts:NRCELL":
-        return "5G"
-
-    if c_lower == "noklte:lncel":
-        return "LTE_GENERIC"
-
-    if c_lower == "noklte:lncel_fdd":
-        return "LTE_FDD"
-
-    if c_lower == "noklte:lncel_tdd":
-        return "LTE_TDD"
-
-    return None
-
-
 def build_site_row(
     xml_path: Path,
     source_root: Optional[Path],
@@ -279,11 +262,11 @@ def build_site_row(
         "xml_snapshot_date": xml_snapshot_date,
         "site_id": site_id,
         "site_dn": site_dn,
-        "site_name": site_name,
+        "site_name": resolve_parsed_value(site_name),
         "site_state": infer_site_state(blocking_state),
-        "blocking_state": blocking_state,
-        "ip_address": ip_address,
-        "sw_version": sw_version,
+        "blocking_state": resolve_parsed_value(blocking_state),
+        "ip_address": resolve_parsed_value(ip_address),
+        "sw_version": resolve_parsed_value(sw_version),
         "nb_cells": nb_2g + nb_3g + nb_lte_4g + nb_5g,
         "nb_cells_2g": nb_2g,
         "nb_cells_3g": nb_3g,
@@ -326,37 +309,105 @@ def extract_id(config_dn: Optional[str]) -> Optional[str]:
     return normalize_ref_id(str(config_dn).split("/")[-1])
 
 
-def extract_equipment_fields(params: Dict[str, Optional[str]]) -> Dict[str, Optional[str]]:
+def extract_parent_dn(dist_name: Optional[str], object_type: str) -> Optional[str]:
+    if not dist_name:
+        return None
+
+    parts = str(dist_name).split("/")
+    if len(parts) < 2:
+        return None
+
+    base = base_object_type(object_type)
+    parent_segment = parts[-2].upper()
+
+    if base == "RETU" and parent_segment.startswith("ALD"):
+        return "/".join(parts[:-1])
+    if base == "ANTL" and parent_segment.startswith("RMOD"):
+        return "/".join(parts[:-1])
+    if base in {"BBMOD", "SMOD"} and parent_segment.startswith("CABINET"):
+        return "/".join(parts[:-1])
+
+    return None
+
+
+def extract_equipment_fields(
+    params: Dict[str, Optional[str]],
+    object_type: str = "",
+) -> Dict[str, Optional[str]]:
+    """
+    Map Nokia EQM / EQMR params to inventory fields.
+
+    EQM (planned config):
+      BBMOD/SMOD/RMOD -> product_code=prodCodePlanned only
+      CABINET/ANTL    -> no serial/code/name (filled from *_R or antPortId)
+
+    EQMR (*_R runtime, authoritative when merged):
+      BBMOD/SMOD/RMOD/CABINET -> productCode, productName, serialNumber
+      RETU -> antSerial, antModel
+      ALD  -> serialNumber, productCode, productName|productCode
+    """
+    object_type = str(object_type or "").upper()
+    base_type = base_object_type(object_type)
+    is_runtime = object_type.endswith("_R")
+
+    runtime_hw_serial = [
+        "serialNumber",
+        "coreHwBoardSerialNumber",
+        "hwSerialNumber",
+        "chassisSerialNumber",
+    ]
+    runtime_hw_code = [
+        "productCode",
+        "coreHwBoardProductCode",
+        "hwProductCode",
+        "chassisProductCode",
+    ]
+    runtime_hw_name = [
+        "productName",
+        "coreHwBoardProductName",
+        "hwProductName",
+    ]
+
+    if base_type == "RETU":
+        serial_keys = ["antSerial"]
+        code_keys = ["antModel"]
+        name_keys = ["antModel"]
+    elif base_type == "ALD":
+        serial_keys = ["serialNumber"]
+        code_keys = ["productCode"]
+        name_keys = ["productName", "productCode", "controlProtocol"]
+    elif base_type == "ANTL":
+        serial_keys = []
+        code_keys = []
+        name_keys = []
+    elif is_runtime and base_type in {"BBMOD", "SMOD", "RMOD", "CABINET"}:
+        serial_keys = runtime_hw_serial
+        code_keys = runtime_hw_code
+        name_keys = runtime_hw_name
+    elif not is_runtime and base_type in {"BBMOD", "SMOD", "RMOD"}:
+        serial_keys = []
+        code_keys = ["prodCodePlanned"]
+        name_keys = []
+    elif not is_runtime and base_type == "CABINET":
+        serial_keys = []
+        code_keys = []
+        name_keys = []
+    else:
+        serial_keys = runtime_hw_serial
+        code_keys = ["prodCodePlanned", *runtime_hw_code]
+        name_keys = runtime_hw_name
+
+    serial_number = first(params, serial_keys) if serial_keys else None
+    product_code = first(params, code_keys) if code_keys else None
+    product_name = first(params, name_keys) if name_keys else None
+
+    if base_type == "ANTL" and params.get("antPortId"):
+        product_name = product_name or f"Port {params['antPortId']}"
+
     return {
-        "serial_number": first(
-            params,
-            [
-                "serialNumber",
-                "coreHwBoardSerialNumber",
-                "hwSerialNumber",
-                "chassisSerialNumber",
-                "antSerial",
-            ],
-        ),
-        "product_code": first(
-            params,
-            [
-                "productCode",
-                "prodCodePlanned",
-                "coreHwBoardProductCode",
-                "hwProductCode",
-                "chassisProductCode",
-            ],
-        ),
-        "product_name": first(
-            params,
-            [
-                "productName",
-                "coreHwBoardProductName",
-                "hwProductName",
-                "antModel",
-            ],
-        ),
+        "serial_number": serial_number,
+        "product_code": product_code,
+        "product_name": product_name,
     }
 
 
@@ -381,7 +432,7 @@ def enrich_equipment_with_reference(df: pd.DataFrame) -> pd.DataFrame:
         "snapshot_date",
         "site_id",
         "base_object_type",
-        "id",
+        "config_dn",
         "serial_number",
         "product_code",
         "product_name",
@@ -400,7 +451,7 @@ def enrich_equipment_with_reference(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     merge_cols = [
-        c for c in ["source_file", "snapshot_date", "site_id", "base_object_type", "id"]
+        c for c in ["source_file", "snapshot_date", "site_id", "base_object_type", "config_dn"]
         if c in main_df.columns and c in ref_lookup.columns
     ]
 
@@ -409,9 +460,25 @@ def enrich_equipment_with_reference(df: pd.DataFrame) -> pd.DataFrame:
 
     result = main_df.merge(ref_lookup, how="left", on=merge_cols)
 
-    result["serial_number"] = result["serial_number"].fillna(result.get("ref_serial_number"))
-    result["product_code"] = result["product_code"].fillna(result.get("ref_product_code"))
-    result["product_name"] = result["product_name"].fillna(result.get("ref_product_name"))
+    ref_serial = result.get("ref_serial_number")
+    ref_code = result.get("ref_product_code")
+    ref_name = result.get("ref_product_name")
+
+    if ref_serial is not None:
+        result["serial_number"] = ref_serial.combine_first(result["serial_number"])
+    else:
+        result["serial_number"] = result["serial_number"].fillna(ref_serial)
+
+    if ref_code is not None:
+        # Runtime *_R productCode is authoritative (e.g. 475266A.104 vs planned 475266A).
+        result["product_code"] = ref_code.combine_first(result["product_code"])
+    else:
+        result["product_code"] = result["product_code"].fillna(ref_code)
+
+    if ref_name is not None:
+        result["product_name"] = ref_name.combine_first(result["product_name"])
+    else:
+        result["product_name"] = result["product_name"].fillna(ref_name)
 
     return result.drop(
         columns=["ref_serial_number", "ref_product_code", "ref_product_name"],
@@ -419,11 +486,37 @@ def enrich_equipment_with_reference(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def reconcile_product_display_fields(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop product_name when it duplicates product_code for modules with distinct runtime names."""
+    if df.empty or "object_type" not in df.columns:
+        return df
+
+    df = df.copy()
+    distinct_name_types = {"BBMOD", "SMOD", "RMOD", "CABINET"}
+    if "product_name" not in df.columns or "product_code" not in df.columns:
+        return df
+
+    name_text = df["product_name"].astype("string").str.strip()
+    code_text = df["product_code"].astype("string").str.strip()
+    duplicate_name = (
+        df["object_type"].isin(distinct_name_types)
+        & name_text.notna()
+        & code_text.notna()
+        & (name_text == code_text)
+    )
+    df.loc[duplicate_name, "product_name"] = pd.NA
+    return df
+
+
 def build_final_equipment_inventory(df_equipment: pd.DataFrame) -> pd.DataFrame:
     if df_equipment.empty:
         return pd.DataFrame()
 
     df = enrich_equipment_with_reference(df_equipment)
+
+    df = reconcile_product_display_fields(df)
+
+    df = finalize_equipment_field_values(df)
 
     df = df[df["object_type"].isin(FINAL_EQUIPMENT_TYPES)].copy()
 
@@ -437,6 +530,7 @@ def build_final_equipment_inventory(df_equipment: pd.DataFrame) -> pd.DataFrame:
         "serial_number",
         "product_code",
         "product_name",
+        "parent_dn",
         "class",
         "config_dn",
         "source_file",
@@ -476,6 +570,7 @@ def build_final_equipment_inventory(df_equipment: pd.DataFrame) -> pd.DataFrame:
         "serial_number",
         "product_code",
         "product_name",
+        "parent_dn",
         "class",
         "config_dn",
         "source_file",
@@ -568,12 +663,12 @@ def build_equipment_completeness_report(df_equipment: pd.DataFrame) -> pd.DataFr
         df_equipment.groupby(existing_group_cols, dropna=False)
         .agg(
             total_rows=("object_type", "size"),
-            serial_filled=("serial_number", lambda s: s.notna().sum()),
-            serial_missing=("serial_number", lambda s: s.isna().sum()),
-            product_code_filled=("product_code", lambda s: s.notna().sum()),
-            product_code_missing=("product_code", lambda s: s.isna().sum()),
-            product_name_filled=("product_name", lambda s: s.notna().sum()),
-            product_name_missing=("product_name", lambda s: s.isna().sum()),
+            serial_filled=("serial_number", lambda s: s.map(lambda v: not is_missing_parsed_value(v)).sum()),
+            serial_missing=("serial_number", lambda s: s.map(is_missing_parsed_value).sum()),
+            product_code_filled=("product_code", lambda s: s.map(lambda v: not is_missing_parsed_value(v)).sum()),
+            product_code_missing=("product_code", lambda s: s.map(is_missing_parsed_value).sum()),
+            product_name_filled=("product_name", lambda s: s.map(lambda v: not is_missing_parsed_value(v)).sum()),
+            product_name_missing=("product_name", lambda s: s.map(is_missing_parsed_value).sum()),
         )
         .reset_index()
     )
@@ -693,7 +788,7 @@ def parse_xml_file(
 
             if object_type in EQUIPMENT_TYPES:
                 config_dn = first(params, ["configDN"]) or dist_name
-                fields = extract_equipment_fields(params)
+                fields = extract_equipment_fields(params, object_type)
 
                 row_site_id = site_id or current_site_id
                 row_site_dn = site_dn or current_site_dn
@@ -715,6 +810,7 @@ def parse_xml_file(
                         "serial_number": fields["serial_number"],
                         "product_code": fields["product_code"],
                         "product_name": fields["product_name"],
+                        "parent_dn": extract_parent_dn(dist_name, object_type),
                     }
                 )
 
@@ -762,6 +858,71 @@ def parse_xml_file(
 # ============================================================
 # PARSING PARALLÈLE DE TOUT LE DOSSIER
 # ============================================================
+
+def format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _empty_parse_stats() -> Dict[str, int]:
+    return {
+        "sites": 0,
+        "equipment": 0,
+        "cells_total": 0,
+        "cells_2g": 0,
+        "cells_3g": 0,
+        "cells_lte_4g": 0,
+        "cells_lte_fdd": 0,
+        "cells_lte_tdd": 0,
+        "cells_5g": 0,
+    }
+
+
+def _accumulate_site_stats(stats: Dict[str, int], site: Dict[str, Any]) -> None:
+    stats["sites"] += 1
+    stats["cells_2g"] += int(site.get("nb_cells_2g") or 0)
+    stats["cells_3g"] += int(site.get("nb_cells_3g") or 0)
+    stats["cells_lte_4g"] += int(site.get("nb_cells_lte_4g") or 0)
+    stats["cells_lte_fdd"] += int(site.get("nb_cells_lte_fdd") or 0)
+    stats["cells_lte_tdd"] += int(site.get("nb_cells_lte_tdd") or 0)
+    stats["cells_5g"] += int(site.get("nb_cells_5g") or 0)
+    stats["cells_total"] += int(site.get("nb_cells") or 0)
+
+
+def _emit_parse_progress(
+    *,
+    index: int,
+    total_files: int,
+    started_at: float,
+    stats: Dict[str, int],
+    snapshot_date: Optional[str],
+    workers: int,
+    final: bool = False,
+) -> None:
+    elapsed = time.perf_counter() - started_at
+    percent = round((index / total_files) * 100, 1) if total_files else 100.0
+    rate = index / elapsed if elapsed > 0 else 0.0
+    remaining = total_files - index
+    eta_seconds = remaining / rate if rate > 0 else 0.0
+
+    label = "TERMINÉ" if final else "PROGRESSION"
+    message = (
+        f"[PARSE {label}] {index:,}/{total_files:,} XML ({percent}%) | "
+        f"temps écoulé {format_duration(elapsed)}"
+        + (f" | ETA {format_duration(eta_seconds)}" if not final and remaining > 0 else "")
+        + f" | workers={workers}"
+        + (f" | snapshot={snapshot_date}" if snapshot_date else "")
+        + f" | sites={stats['sites']:,} | équipements={stats['equipment']:,}"
+        + f" | cellules 2G={stats['cells_2g']:,} 3G={stats['cells_3g']:,}"
+        + f" 4G={stats['cells_lte_4g']:,} (FDD={stats['cells_lte_fdd']:,} TDD={stats['cells_lte_tdd']:,})"
+        + f" 5G={stats['cells_5g']:,} | total={stats['cells_total']:,}"
+        + (f" | débit {rate:.1f} XML/s" if rate > 0 else "")
+    )
+    print(message, flush=True)
+    logger.info(message)
+
 
 def _worker(args: Tuple[str, Optional[str], Optional[str], Optional[str]]) -> Dict[str, Any]:
     xml_file, forced_snapshot_date, date_folder, source_root = args
@@ -825,13 +986,36 @@ def parse_folder_parallel(
     ]
 
     total_files = len(tasks)
+    stats = _empty_parse_stats()
+    started_at = time.perf_counter()
+    worker_count = max_workers if max_workers not in (None, 0) else 1
+
+    print(
+        f"[PARSE DÉMARRAGE] dossier={xml_folder} | fichiers XML={total_files:,}"
+        f" | snapshot={forced_snapshot_date or date_folder or 'auto'}"
+        f" | workers={worker_count if max_workers != 0 else 'séquentiel'}",
+        flush=True,
+    )
+    logger.info("Démarrage parsing Nokia: %s fichiers dans %s", total_files, xml_folder)
 
     def consume_result(i: int, result: Dict[str, Any]) -> None:
-        if result.get("site"):
-            site_rows.append(result["site"])
+        site = result.get("site")
+        if site:
+            site_rows.append(site)
+            _accumulate_site_stats(stats, site)
         equipment_rows.extend(result.get("equipment", []))
+        stats["equipment"] = len(equipment_rows)
+
         if i % 50 == 0 or i == total_files:
-            print(f"[PARSE] {i}/{total_files} fichiers XML traités")
+            _emit_parse_progress(
+                index=i,
+                total_files=total_files,
+                started_at=started_at,
+                stats=stats,
+                snapshot_date=forced_snapshot_date or date_folder,
+                workers=worker_count if max_workers != 0 else 1,
+                final=i == total_files,
+            )
 
     # max_workers=0: sequential mode (stable when called from FastAPI on Windows)
     if max_workers == 0:
@@ -841,6 +1025,7 @@ def parse_folder_parallel(
 
     if max_workers is None:
         max_workers = max(1, (os.cpu_count() or 4) - 1)
+        worker_count = max_workers
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         for i, result in enumerate(executor.map(_worker, tasks), start=1):
@@ -897,7 +1082,37 @@ if __name__ == "__main__":
         max_workers=args.max_workers,
     )
 
+    if not sites.empty:
+        cell_preview = sites[
+            [
+                c
+                for c in [
+                    "site_id",
+                    "nb_cells",
+                    "nb_cells_2g",
+                    "nb_cells_3g",
+                    "nb_cells_lte_4g",
+                    "nb_cells_lte_fdd",
+                    "nb_cells_lte_tdd",
+                    "nb_cells_5g",
+                    "technologies",
+                ]
+                if c in sites.columns
+            ]
+        ].head(5)
+        print("\nAperçu cellules (5 premiers sites):")
+        print(cell_preview.to_string(index=False))
+
     print("=" * 80)
-    print(f"Sites: {len(sites)}")
-    print(f"Équipements bruts: {len(equipment)}")
+    print(f"Sites: {len(sites):,}")
+    print(f"Équipements bruts: {len(equipment):,}")
+    if not sites.empty:
+        print(
+            "Totaux cellules — "
+            f"2G={int(sites['nb_cells_2g'].sum()):,} | "
+            f"3G={int(sites['nb_cells_3g'].sum()):,} | "
+            f"4G={int(sites['nb_cells_lte_4g'].sum()):,} | "
+            f"5G={int(sites['nb_cells_5g'].sum()):,} | "
+            f"total={int(sites['nb_cells'].sum()):,}"
+        )
     print("=" * 80)

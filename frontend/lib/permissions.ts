@@ -2,32 +2,47 @@ export type UserRole = "admin" | "user";
 
 export const USER_ALLOWED_ROUTES = [
   "/",
+  "/timeline",
+  "/delta",
   "/sites",
   "/inventaire",
   "/asset-distribution",
-  "/delta",
+  "/guardian",
+  "/foresight",
+  "/insight",
+  "/signals",
   "/statistiques",
-  "/remplacements",
-  "/cartes-risque",
-  "/patterns",
   "/analytics",
+  "/power-bi",
+  "/prediction",
+  "/spares",
+  "/patterns",
+  "/cartes-risque",
   "/anomalies",
   "/quality",
   "/ai-assistant",
-  "/prediction",
-  "/spares",
+  "/remplacements",
 ] as const;
 
 export const ADMIN_ONLY_ROUTES = [
   "/ops",
+  "/import",
+  "/clustering",
   "/temporal-changes",
   "/global-counters",
-  "/clustering",
-  "/ai-report",
   "/admin",
 ] as const;
 
-export const PUBLIC_ROUTES = ["/login", "/signup", "/activate"] as const;
+export const PUBLIC_ROUTES = [
+  "/login",
+  "/signup",
+  "/register",
+  "/activate",
+  "/verify-email",
+  "/forgot-password",
+  "/reset-password",
+  "/admin/setup",
+] as const;
 
 export function isPublicRoute(pathname: string): boolean {
   return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));

@@ -1,15 +1,23 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { SWRConfig } from "swr";
 import type { Dispatch, SetStateAction } from "react";
 import type { FilterContext, FilterPayload, RanVendor } from "@/lib/types";
 
 const VENDOR_STORAGE_KEY = "ran_intelligence_vendor";
+const LANGUAGE_STORAGE_KEY = "ran_intelligence_language";
 
 function readStoredVendor(): RanVendor {
   if (typeof window === "undefined") return "nokia";
   const stored = window.localStorage.getItem(VENDOR_STORAGE_KEY);
   return stored === "huawei" ? "huawei" : "nokia";
+}
+
+function readStoredLanguage(): FilterContext["language"] {
+  if (typeof window === "undefined") return "Français";
+  const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  return stored === "English" ? "English" : "Français";
 }
 
 type AppContextType = {
@@ -54,9 +62,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const vendor = readStoredVendor();
-    if (vendor !== "nokia") {
-      setFilters((prev) => ({ ...prev, vendor }));
-    }
+    const language = readStoredLanguage();
+    setFilters((prev) => ({
+      ...prev,
+      vendor: vendor !== "nokia" ? vendor : prev.vendor,
+      language,
+    }));
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -86,17 +97,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const next = typeof value === "function" ? value(prev) : value;
       if (typeof window !== "undefined") {
         window.localStorage.setItem(VENDOR_STORAGE_KEY, next.vendor);
+        window.localStorage.setItem(LANGUAGE_STORAGE_KEY, next.language);
       }
       return next;
     });
   };
 
   return (
-    <AppContext.Provider
-      value={{ filters, setFilters: setFiltersWithVendorPersist, payload, sidebarOpen, setSidebarOpen, navCollapsed, setNavCollapsed }}
+    <SWRConfig
+      value={{
+        revalidateOnFocus: false,
+        dedupingInterval: 30_000,
+        errorRetryCount: 2,
+      }}
     >
-      {children}
-    </AppContext.Provider>
+      <AppContext.Provider
+        value={{ filters, setFilters: setFiltersWithVendorPersist, payload, sidebarOpen, setSidebarOpen, navCollapsed, setNavCollapsed }}
+      >
+        {children}
+      </AppContext.Provider>
+    </SWRConfig>
   );
 }
 

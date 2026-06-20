@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { copyToClipboard, downloadResponsePdf } from "@/lib/ai-export";
+import { copyToClipboard, downloadResponsePdf, downloadTextFile } from "@/lib/ai-export";
 import { t, type Locale } from "@/lib/i18n";
 
 type AiMessageActionsProps = {
@@ -9,6 +9,7 @@ type AiMessageActionsProps = {
   messageId: string;
   content: string;
   speaking: boolean;
+  loading?: boolean;
   feedback?: "up" | "down";
   showData?: boolean;
   onToggleSpeak: () => void;
@@ -21,20 +22,24 @@ function ActionBtn({
   title,
   onClick,
   active,
+  disabled,
   children,
 }: {
   title: string;
   onClick: () => void;
   active?: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
       title={title}
+      aria-label={title}
+      disabled={disabled}
       onClick={onClick}
-      className={`rounded-lg p-1.5 transition ${
-        active ? "bg-red-50 text-red-600" : "text-red-400 hover:bg-red-50 hover:text-red-600"
+      className={`rounded-lg p-1.5 transition disabled:cursor-not-allowed disabled:opacity-40 ${
+        active ? "bg-teal-50 text-teal-700" : "text-slate-500 hover:bg-slate-50 hover:text-teal-700"
       }`}
     >
       {children}
@@ -63,6 +68,15 @@ function IconThumbDown() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
       <path d="M17 13V5a1 1 0 0 0-1-1h-2v9h2a1 1 0 0 0 1-1Zm-3 8H7l2-7H5l6-9v8h3l-2 8Z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconTxt() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v5h5M8 13h6M8 17h4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -109,6 +123,7 @@ export function AiMessageActions({
   messageId,
   content,
   speaking,
+  loading = false,
   feedback,
   showData,
   onToggleSpeak,
@@ -128,7 +143,11 @@ export function AiMessageActions({
 
   return (
     <div className="mt-1.5 flex items-center gap-0.5">
-      <ActionBtn title={copied ? t(language, "ai_copied") : t(language, "ai_copy")} onClick={() => void handleCopy()}>
+      <ActionBtn
+        title={copied ? t(language, "ai_copied") : t(language, "ai_copy")}
+        active={copied}
+        onClick={() => void handleCopy()}
+      >
         <IconCopy />
       </ActionBtn>
       <ActionBtn
@@ -151,7 +170,17 @@ export function AiMessageActions({
       >
         <IconPdf />
       </ActionBtn>
-      <ActionBtn title={t(language, "ai_regenerate")} onClick={onRegenerate}>
+      <ActionBtn
+        title={t(language, "ai_download_txt")}
+        onClick={() => downloadTextFile(content.replace(/\*\*/g, ""), `ran-intelligence-${messageId}.txt`)}
+      >
+        <IconTxt />
+      </ActionBtn>
+      <ActionBtn
+        title={t(language, "ai_regenerate")}
+        disabled={loading}
+        onClick={onRegenerate}
+      >
         <IconRefresh />
       </ActionBtn>
       <ActionBtn title={speaking ? t(language, "ai_stop_read") : t(language, "ai_listen")} active={speaking} onClick={onToggleSpeak}>

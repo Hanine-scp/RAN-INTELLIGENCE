@@ -1,7 +1,12 @@
 "use client";
 
-import { DeltaUnifiedPage } from "@/components/delta-unified-page";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function DeltaPage() {
-  return <DeltaUnifiedPage title="Delta Premium" subtitle="Vue fusionnée Delta + Delta Intelligence" />;
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/timeline");
+  }, [router]);
+  return null;
 }

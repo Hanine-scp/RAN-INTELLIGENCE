@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raml xmlns="http://www.nokia.com/ran" version="2.0">
+  <log dateTime="2025-06-08T00:00:00+00:00" vendor="Nokia" distName="MRBTS-12005" action="create">
+    <managedObject class="com.nokia.srbts:MRBTS" distName="MRBTS-12005" operation="create">
+      <p name="btsName">TEST_SITE</p>
+      <p name="blockingState">unblocked</p>
+    </managedObject>
+
+    <managedObject class="com.nokia.srbts.eqm:CABINET" version="EQM25R2_2503_111" distName="MRBTS-12005/EQM-1/APEQM-1/CABINET-1" operation="create">
+      <p name="temperatureSensor">front</p>
+    </managedObject>
+    <managedObject class="com.nokia.srbts.eqm:SMOD" version="EQM25R2_2503_111" distName="MRBTS-12005/EQM-1/APEQM-1/CABINET-1/SMOD-1" operation="create">
+      <p name="prodCodePlanned">473095A</p>
+    </managedObject>
+    <managedObject class="com.nokia.srbts.eqm:BBMOD" version="EQM25R2_2503_111" distName="MRBTS-12005/EQM-1/APEQM-1/CABINET-1/BBMOD-1" operation="create">
+      <p name="prodCodePlanned">473096A</p>
+    </managedObject>
+
+    <managedObject class="com.nokia.srbts.eqm:RMOD" version="EQM25R2_2503_111" distName="MRBTS-12005/EQM-1/APEQM-1/RMOD-1" operation="create">
+      <p name="prodCodePlanned">474840A</p>
+    </managedObject>
+    <managedObject class="com.nokia.srbts.eqm:ANTL" version="EQM25R2_2503_111" distName="MRBTS-12005/EQM-1/APEQM-1/RMOD-1/ANTL-1" operation="create">
+      <p name="antPortId">1</p>
+    </managedObject>
+
+    <managedObject class="com.nokia.srbts.eqm:ALD" version="EQM25R2_2503_111" distName="MRBTS-12005/EQM-1/APEQM-1/ALD-1" operation="create">
+      <p name="controlProtocol">AISG 2.0</p>
+      <p name="productCode">FlexRET</p>
+      <p name="serialNumber">AU040K450066T--Y3</p>
+    </managedObject>
+    <managedObject class="com.nokia.srbts.eqm:RETU" version="EQM25R2_2503_111" distName="MRBTS-12005/EQM-1/APEQM-1/ALD-1/RETU-1" operation="create">
+      <p name="antModel">AE049</p>
+      <p name="antSerial">AE049L110027T--Y3</p>
+    </managedObject>
+
+    <managedObject class="com.nokia.srbts.eqmr:CABINET_R" version="EQMR25R2_2503_111" distName="MRBTS-12005/EQM_R-1/APEQM_R-1/CABINET_R-1" operation="create">
+      <p name="configDN">MRBTS-12005/EQM-1/APEQM-1/CABINET-1</p>
+      <p name="productCode">FSMr3</p>
+      <p name="productName">Flexi Cabinet</p>
+      <p name="serialNumber">NK155060307</p>
+    </managedObject>
+    <managedObject class="com.nokia.srbts.eqmr:SMOD_R" version="EQMR25R2_2503_111" distName="MRBTS-12005/EQM_R-1/APEQM_R-1/CABINET_R-1/SMOD_R-1" operation="create">
+      <p name="configDN">MRBTS-12005/EQM-1/APEQM-1/CABINET-1/SMOD-1</p>
+      <p name="productCode">473095A</p>
+      <p name="productName">Flexi System Module</p>
+      <p name="serialNumber">NK155060308</p>
+    </managedObject>
+    <managedObject class="com.nokia.srbts.eqmr:BBMOD_R" version="EQMR25R2_2503_111" distName="MRBTS-12005/EQM_R-1/APEQM_R-1/CABINET_R-1/BBMOD_R-1" operation="create">
+      <p name="configDN">MRBTS-12005/EQM-1/APEQM-1/CABINET-1/BBMOD-1</p>
+      <p name="productCode">473096A</p>
+      <p name="productName">Flexi Baseband Module</p>
+      <p name="serialNumber">AS173705940</p>
+    </managedObject>
+    <managedObject class="com.nokia.srbts.eqmr:RMOD_R" version="EQMR25R2_2503_111" distName="MRBTS-12005/EQM_R-1/APEQM_R-1/RMOD_R-1" operation="create">
+      <p name="configDN">MRBTS-12005/EQM-1/APEQM-1/RMOD-1</p>
+      <p name="productCode">474840A</p>
+      <p name="productName">Radio Module ARDA</p>
+      <p name="serialNumber">K9204527162</p>
+    </managedObject>
+  </log>
+</raml>

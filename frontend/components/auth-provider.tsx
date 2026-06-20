@@ -2,9 +2,9 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { clearSession, getAccessToken, getStoredUser, saveSession, type AuthSession, type AuthUser } from "@/lib/auth";
+import { clearSession, getAccessToken, getRefreshToken, saveSession, touchAuthCookie, type AuthSession, type AuthUser } from "@/lib/auth";
 import { canAccessRoute, isPublicRoute } from "@/lib/permissions";
-import { fetchAuthMe, logoutSession } from "@/lib/api";
+import { ensureAuthSession, logoutSession, startAuthKeepAlive } from "@/lib/api";
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -49,18 +49,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const refreshUser = useCallback(async () => {
-    const token = getAccessToken();
-    if (!token) {
+    if (!getAccessToken() && !getRefreshToken()) {
       setUser(null);
       return;
     }
-    try {
-      const me = await fetchAuthMe();
-      setUser(me);
-    } catch {
+    const me = await ensureAuthSession();
+    if (!me) {
       clearSession();
       setUser(null);
+      return;
     }
+    touchAuthCookie();
+    setUser(me);
   }, []);
 
   useEffect(() => {
@@ -69,29 +69,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const stored = getStoredUser();
-      const token = getAccessToken();
-      if (!token) {
+      if (!getAccessToken() && !getRefreshToken()) {
         setUser(null);
         setLoading(false);
         return;
       }
-      if (!document.cookie.includes("ran_auth=1")) {
-        document.cookie = "ran_auth=1; path=/; max-age=1800; SameSite=Lax";
-      }
-      setUser(stored);
-      try {
-        const me = await fetchAuthMe();
-        setUser(me);
-      } catch {
+      touchAuthCookie();
+      const me = await ensureAuthSession();
+      if (!me) {
         clearSession();
         setUser(null);
-      } finally {
-        setLoading(false);
+      } else {
+        touchAuthCookie();
+        setUser(me);
       }
+      setLoading(false);
     };
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    return startAuthKeepAlive();
+  }, [user]);
 
   useEffect(() => {
     if (!canNavigate || loading) return;

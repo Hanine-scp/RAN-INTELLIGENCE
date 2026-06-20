@@ -789,6 +789,13 @@ def rebuild_consolidated_outputs(paths: ProjectPaths) -> dict[str, int]:
         paths.processed / "delta_site_details.csv",
     )
 
+    try:
+        from src.services.powerbi_export_service import powerbi_export_service
+
+        powerbi_export_service.sync_export()
+    except Exception:
+        pass
+
     return {
         "total_sites": len(df_sites_all),
         "total_equipment": len(df_equipment_all),
@@ -839,7 +846,7 @@ def process_uploaded_snapshot(
     validate_lake(paths)
 
     elapsed = time.perf_counter() - started
-    return {
+    result = {
         "snapshot_date": batch.folder_date,
         "snapshot_folder": batch.folder_name,
         "xml_count": xml_count,
@@ -847,6 +854,20 @@ def process_uploaded_snapshot(
         **date_counts,
         **consolidated,
     }
+
+    try:
+        from src.services.guardian_orchestrator import guardian_orchestrator
+
+        guardian = guardian_orchestrator.run_after_ingest(
+            batch.folder_date,
+            vendor="nokia",
+            file_count=xml_count,
+        )
+        result["guardian"] = guardian
+    except Exception as exc:
+        result["guardian_error"] = str(exc)
+
+    return result
 
 
 def find_snapshot_folder(source_root: Path, snapshot_date: str) -> Optional[Path]:

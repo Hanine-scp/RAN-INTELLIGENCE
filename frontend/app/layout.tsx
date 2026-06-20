@@ -3,6 +3,9 @@ import "./globals.css";
 import { AppProvider } from "@/components/app-provider";
 import { AuthProvider } from "@/components/auth-provider";
 import { LayoutFrame } from "@/components/layout-frame";
+import { WebVitalsReporter } from "@/components/web-vitals";
+import { ClientErrorBoundary } from "@/components/error-reporter";
+import { ErrorReporterInit } from "@/components/error-reporter-init";
 
 export const metadata: Metadata = {
   title: "RAN Intelligence Platform",
@@ -23,7 +26,11 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col text-slate-900">
         <AuthProvider>
           <AppProvider>
-            <LayoutFrame>{children}</LayoutFrame>
+            <WebVitalsReporter />
+            <ErrorReporterInit />
+            <ClientErrorBoundary>
+              <LayoutFrame>{children}</LayoutFrame>
+            </ClientErrorBoundary>
           </AppProvider>
         </AuthProvider>
       </body>

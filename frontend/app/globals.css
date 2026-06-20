@@ -1,17 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f4f6fa;
-  --foreground: #0f172a;
+  --background: #fafbfc;
+  --foreground: #475569;
   --panel: #ffffff;
-  --panel-soft: #fafbfc;
-  --border: #e8edf3;
-  --accent: #dc2626;
-  --accent-deep: #b51218;
-  --accent-glow: rgba(220, 38, 38, 0.12);
+  --panel-soft: #f8fafc;
+  --border: #e2e8f0;
+  --accent: #16a085;
+  --accent-deep: #12856d;
+  --accent-glow: rgba(22, 160, 133, 0.1);
+  --brand-navy: #5a7389;
+  --brand-teal: #16a085;
+  --brand-royal: #0984e3;
+  --brand-sky: #74b9ff;
+  --brand-orange: #e67e22;
+  --brand-sage: #9db09e;
+  --brand-red: #d63031;
   --muted: #64748b;
-  --premium-shadow: 0 10px 40px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(220, 38, 38, 0.04);
-  --premium-shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.08), 0 4px 14px rgba(220, 38, 38, 0.06);
+  --premium-shadow: 0 8px 30px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(22, 160, 133, 0.04);
+  --premium-shadow-lg: 0 14px 40px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(22, 160, 133, 0.05);
+  --platform-table-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
 }
 
 @theme inline {
@@ -19,6 +27,30 @@
   --color-foreground: var(--foreground);
   --font-sans: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
   --font-mono: "Consolas", "Courier New", monospace;
+
+  /* Premium remap — red scale → light slate / teal UI accents */
+  --color-red-50: #f8fafc;
+  --color-red-100: #eef8f5;
+  --color-red-200: #d5f0ea;
+  --color-red-300: #abdfd3;
+  --color-red-400: #16a085;
+  --color-red-500: #5a7389;
+  --color-red-600: #16a085;
+  --color-red-700: #12856d;
+  --color-red-800: #0e6b58;
+  --color-red-900: #475569;
+
+  /* Teal scale — accent */
+  --color-teal-50: #eef8f5;
+  --color-teal-100: #d5f0ea;
+  --color-teal-200: #abdfd3;
+  --color-teal-300: #7ecec1;
+  --color-teal-400: #16a085;
+  --color-teal-500: #16a085;
+  --color-teal-600: #12856d;
+  --color-teal-700: #0e6b58;
+  --color-teal-800: #0a5143;
+  --color-teal-900: #06372e;
 }
 
 body {
@@ -28,8 +60,8 @@ body {
 }
 
 ::selection {
-  background: #fee2e2;
-  color: #7f1d1d;
+  background: #d5f0ea;
+  color: #0e6b58;
 }
 
 ::-webkit-scrollbar {
@@ -54,34 +86,47 @@ body {
 }
 
 .premium-card {
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 252, 252, 0.96) 100%);
+  border: 1px solid rgba(223, 230, 233, 0.95);
+  background: #ffffff;
   box-shadow: var(--premium-shadow);
-  backdrop-filter: blur(8px);
+  border-radius: 1rem;
 }
 
 .premium-card-red {
-  border: 1px solid rgba(254, 202, 202, 0.55);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(254, 242, 242, 0.92) 100%);
+  border: 1px solid rgba(22, 160, 133, 0.2);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(238, 248, 245, 0.92) 100%);
   box-shadow: var(--premium-shadow);
+  border-radius: 1rem;
+}
+
+.text-brand-accent {
+  color: var(--accent);
+}
+
+.bg-brand-soft {
+  background: rgba(22, 160, 133, 0.08);
+}
+
+.border-brand-soft {
+  border-color: rgba(22, 160, 133, 0.22);
 }
 
 .premium-glass {
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(14px);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 20px 50px rgba(36, 52, 71, 0.18);
 }
 
 .premium-glass-strong {
   border: 1px solid rgba(255, 255, 255, 0.35);
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.08) 100%);
   backdrop-filter: blur(18px);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 24px 60px rgba(36, 52, 71, 0.22);
 }
 
 .premium-kpi-value {
-  background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+  background: linear-gradient(135deg, #16a085 0%, #0984e3 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -89,6 +134,41 @@ body {
 
 .premium-divider-glow {
   box-shadow: 0 0 24px rgba(255, 255, 255, 0.15);
+}
+
+.platform-section-title {
+  color: #12856d;
+  letter-spacing: 0.12em;
+}
+
+.platform-kpi-band {
+  background: linear-gradient(90deg, #ffffff 0%, #eef8f5 45%, #f0f9ff 100%);
+  color: #475569;
+  border-top: 1px solid #e2e8f0;
+}
+
+.platform-surface {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  border-radius: 1rem;
+  box-shadow: var(--platform-table-shadow);
+}
+
+.platform-surface-header {
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(to right, #f8fafc, #ffffff);
+}
+
+.platform-surface-soft {
+  border: 1px solid var(--border);
+  background: linear-gradient(to bottom, #ffffff, #f8fafc);
+  border-radius: 1rem;
+  box-shadow: var(--platform-table-shadow);
+}
+
+.text-platform-navy {
+  color: #0e6b58;
 }
 
 @keyframes ticker {
@@ -122,12 +202,12 @@ body {
   animation: premium-fade-up 0.55s ease-out both;
 }
 
-/* ── AI Assistant — premium Ooredoo glass (login palette) ── */
+/* ── AI Assistant — premium glass ── */
 
 .ai-chat-shell {
   position: relative;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 24px 60px rgba(36, 52, 71, 0.28);
   backdrop-filter: blur(6px);
 }
 
@@ -135,7 +215,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(14px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 12px 32px rgba(36, 52, 71, 0.18);
 }
 
 .ai-chat-header {
@@ -155,26 +235,26 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.32);
   background: rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(12px);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 12px 36px rgba(36, 52, 71, 0.22);
 }
 
 .ai-chat-input-bar:focus-within {
   border-color: rgba(255, 255, 255, 0.55);
   background: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25), 0 0 0 2px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 36px rgba(36, 52, 71, 0.25), 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
 
 .ai-chat-popover {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   background: #ffffff;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 16px 40px rgba(36, 52, 71, 0.12);
 }
 
 .ai-attach-popover {
   position: relative;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   background: #ffffff;
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 18px 44px rgba(36, 52, 71, 0.14);
 }
 
 .ai-attach-popover-caret {
@@ -185,8 +265,8 @@ body {
   height: 12px;
   transform: rotate(45deg);
   background: #ffffff;
-  border-right: 1px solid #e2e8f0;
-  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .ai-chat-user-bubble {
@@ -199,9 +279,9 @@ body {
 }
 
 .ai-copilot-widget {
-  border: 1px solid rgba(226, 232, 240, 0.95);
+  border: none;
   background: #ffffff;
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.14), 0 4px 16px rgba(220, 38, 38, 0.08);
+  box-shadow: none;
   flex: 1;
   min-width: 0;
 }
@@ -222,46 +302,55 @@ body {
   background: #cbd5e1;
 }
 
+.ai-research-progress .ai-thinking-dots span {
+  width: 3px;
+  height: 3px;
+}
+
+.ai-web-sources {
+  backdrop-filter: blur(8px);
+}
+
 .ai-msg-assistant {
   background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
 }
 
 .ai-msg-user {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: #eef8f5;
+  border: 1px solid #abdfd3;
 }
 
 .ai-copilot-input {
   background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
 }
 
 .ai-copilot-input:focus-within {
-  border-color: #fca5a5;
-  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.08);
+  border-color: #7ecec1;
+  box-shadow: 0 0 0 3px rgba(22, 160, 133, 0.12);
 }
 
 .ai-copilot-icon {
-  color: #dc2626;
+  color: var(--accent);
 }
 
 .ai-copilot-icon:hover {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--accent-deep);
+  background: #eef8f5;
 }
 
 .ai-thinking-dots span {
-  background: rgba(220, 38, 38, 0.55);
+  background: rgba(22, 160, 133, 0.55);
 }
 
 @keyframes ai-voice-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45);
+    box-shadow: 0 0 0 0 rgba(22, 160, 133, 0.45);
   }
   50% {
-    box-shadow: 0 0 0 10px rgba(220, 38, 38, 0);
+    box-shadow: 0 0 0 10px rgba(22, 160, 133, 0);
   }
 }
 

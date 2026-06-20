@@ -1,8 +1,10 @@
-# RAN Intelligence
+# Guardian Nexus AI · RAN Intelligence
 
-**Plateforme d'intelligence réseau RAN multi-vendor** pour l'audit, l'inventaire, l'analyse temporelle et l'assistance IA opérationnelle — conçue pour les équipes NOC / Radio d'Ooredoo Tunisie.
+**Plateforme de décision NOC** pour l'analyse quotidienne des snapshots RAN (Nokia, Huawei en préparation) — conçue pour les équipes NOC / Radio d'Ooredoo Tunisie.
 
-> Inventaire Nokia XML · Delta inter-snapshots · Qualité données · Anomalies · Remplacements · Cartes risque · Patterns serial · Assistant IA conversationnel · Data Trust
+> **RAN Intelligence n'est pas une IA qui parle sur des données réseau. C'est une plateforme où l'IA est placée après la validation, l'analyse, l'anomalie et la prédiction.**
+
+> 4 moteurs : Data Integrity · Change Intelligence · Anomaly Intelligence · Predictive Risk · **Guardian Copilot**
 
 ---
 
@@ -41,7 +43,7 @@ RAN Intelligence transforme les exports XML quotidiens des BTS (Nokia aujourd'hu
 5. **Expliquer** via un assistant conversationnel (OpenAI + outils backend contrôlés).
 6. **Ancrer** l'intégrité des données (hash chaîné par snapshot).
 
-L'objectif n'est pas un simple tableau de bord : c'est un **copilote NOC** qui combine règles métier, lake analytique et IA premium.
+L'objectif n'est pas un simple tableau de bord : c'est **Guardian Nexus AI** — observer → détecter → prédire → expliquer → recommander (human-in-the-loop).
 
 ---
 
@@ -683,7 +685,8 @@ ADMIN_ACCESS_KEY=RAN-ADMIN-MASTER-KEY
 
 | Fichier | Description |
 |---------|-------------|
-| `config/settings.py` | `RAW_DATA_PATH = C:\projects\DATA.XML` |
+| `config/settings.py` | `RAW_DATA_PATH` (défaut `C:\projects\DATA.XML`, surcharge via `DATA_XML_ROOT`) |
+| `.env.docker` | Chemins Docker, ports, URL API frontend |
 | `.env.auth` | JWT, PostgreSQL auth, SMTP, Twilio OTP |
 | `.env.ai` | OpenAI, Claude, `KNOWLEDGE_DATABASE_URL` |
 | `.env.bigdata` | MinIO, Spark, TimescaleDB, Redis |
@@ -700,20 +703,36 @@ Variables d'environnement pipeline :
 
 ## Docker & Big Data
 
-### Stack applicative
+### Stack applicative (portable)
 
 ```powershell
-docker compose up --build
+copy .env.docker.example .env.docker
+# Éditer DATA_XML_HOST_PATH et NEXT_PUBLIC_API_BASE_URL
+
+docker compose --env-file .env.docker up -d --build
+
+# Avec PostgreSQL auth intégré
+docker compose --env-file .env.docker --profile auth up -d --build
 ```
 
 | Service | Port |
 |---------|------|
 | API | http://localhost:8000 |
 | Frontend | http://localhost:3000 |
+| PostgreSQL auth (profil `auth`) | localhost:5433 |
 
-Volume XML : `C:/projects/DATA.XML:/app/DATA.XML:ro`
+Volumes persistants : `data/lake`, `data/bronze` · XML monté en lecture seule via `DATA_XML_HOST_PATH`.
 
-### Stack auth
+### Ingestion J-1 & sauvegarde
+
+```powershell
+.\scripts\daily_ingest.ps1      # Pipeline quotidien (Task Scheduler 06:00)
+.\scripts\backup.ps1            # Sauvegarde lake + trust + PG (23:00)
+```
+
+Runbook complet : [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
+
+### Stack auth standalone (pgAdmin)
 
 ```powershell
 docker compose -f docker-compose.auth.yml up -d
@@ -759,13 +778,14 @@ Guide complet : [`docs/BIG_DATA_MIGRATION.md`](docs/BIG_DATA_MIGRATION.md)
 
 ## CI/CD
 
-Pipeline GitHub Actions (`.github/workflows/ci.yml`) :
+**CI** (`.github/workflows/ci.yml`) — chaque push / PR :
+- Backend : `pip install` → `compileall` → smoke import → build image Docker API
+- Frontend : `npm ci` → `npm run lint` → `npm run build`
 
-**Backend** : Python 3.12 → `pip install` → `compileall` → smoke import `api.main`
-
-**Frontend** : Node 22 → `npm ci` → `npm run lint` → `npm run build`
-
-Déclenché sur push et pull request (toutes branches).
+**CD** (`.github/workflows/cd.yml`) — push sur `main` :
+- Build & push images vers GitHub Container Registry :
+  - `ghcr.io/hanine-scp/ran-intelligence-api`
+  - `ghcr.io/hanine-scp/ran-intelligence-frontend`
 
 ---
 

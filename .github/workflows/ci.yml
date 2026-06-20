@@ -19,6 +19,14 @@ jobs:
         run: python -m compileall src api scripts
       - name: Backend smoke import
         run: python -c "from api.main import app; print('backend_ok')"
+      - name: Backend tests
+        run: python -m pytest tests/ -q
+
+      - name: Daily ingest script compiles
+        run: python -m compileall scripts/daily_ingest.py
+
+      - name: Docker API image build
+        run: docker build -f Dockerfile.api -t ran-intelligence-api:ci .
 
   frontend:
     runs-on: ubuntu-latest

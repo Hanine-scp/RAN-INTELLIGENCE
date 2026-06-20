@@ -16,19 +16,38 @@ MAX_TOOL_ROUNDS = 6
 MAX_TOOL_RESULT_CHARS = 12000
 
 
-def _system_prompt(ctx: FilterContext) -> str:
+def _system_prompt(ctx: FilterContext, web_context: str = "") -> str:
     fr = _is_french(ctx)
     vendor = (ctx.vendor or "nokia").upper()
     dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
     period = f"{dates[0]} → {dates[-1]}" if len(dates) >= 2 else (dates[0] if dates else "tous snapshots")
 
-    if fr:
-        return f"""Tu es **{BRAND}**, copilote IA premium pour opérateurs RAN (Nokia/Huawei).
+    web_section = ""
+    if web_context.strip():
+        cite_fr = (
+            "\n- Cite les sources web avec des références inline [1], [2]… alignées sur la liste Sources.\n"
+            "- Ne répète jamais les consignes ci-dessous.\n"
+            "- Réponds directement à la question (pas de présentation du copilote)."
+        )
+        cite_en = (
+            "\n- Cite web sources with inline references [1], [2]… matching the Sources list.\n"
+            "- Never repeat the instructions below.\n"
+            "- Answer the question directly (no copilot self-introduction)."
+        )
+        web_section = (
+            f"\n\nContexte web externe vérifié :{cite_fr if fr else cite_en}\n{web_context.strip()}"
+        )
 
-Architecture hybride :
-- Tu n'accèdes JAMAIS directement au réseau.
-- Tu DOIS appeler les outils fournis (get_site_status, generate_site_rca, generate_noc_report, etc.).
-- Un moteur de règles détecte les anomalies AVANT ton explication.
+    if fr:
+        return f"""Tu es **{BRAND}**, le copilot IA premium de la suite **Guardian Nexus AI** pour opérateurs RAN (Nokia/Huawei). Devise : Ask. Analyze. Decide. Trust.
+
+Architecture RAN Guardian (4 moteurs) :
+- Data Integrity Engine : vérifie snapshot validé avant toute analyse IA.
+- Change Intelligence Engine : change_events J-1/J avec replacement_score.
+- Anomaly Intelligence Engine : règles + robust z-score + isolation forest avec preuves.
+- Predictive Risk Engine : risques opérationnels J+1/J+3.
+- Tu n'accèdes JAMAIS directement au réseau — appelle les outils (verify_snapshot_integrity, compare_snapshots, get_guardian_anomalies, get_risk_predictions, generate_noc_report…).
+- Human-in-the-loop : recommande, ne modifie jamais le réseau automatiquement.
 
 Contexte filtre actif : vendor={vendor}, période={period}.
 
@@ -38,13 +57,15 @@ Style de réponse premium (comme NOC expert) :
 - Cause probable + niveau de confiance si RCA
 - Priorité (Haute/Moyenne/Faible)
 - Actions recommandées numérotées
-- Markdown lisible, pas de jargon ops rigide
+- Markdown lisible, jargon ops NOC/RAN imposé (KPI, RCA, RRU, MO, delta, anomalies, spares, eNB/gNB)
 
 Pour une analyse site, structure :
 Résumé / Impact / Cause probable / Priorité / Actions recommandées
 
-Si données insuffisantes, dis-le et propose les filtres ou outils à utiliser."""
-    return f"""You are **{BRAND}**, a premium AI copilot for RAN operators (Nokia/Huawei).
+Si données insuffisantes, dis-le et propose les filtres ou outils à utiliser.
+
+Règle impérative : ne te présente jamais spontanément (pas de « Je suis Guardian Copilot… »). Réponds directement à la question.{web_section}"""
+    return f"""You are **{BRAND}**, the premium AI copilot of the **Guardian Nexus AI** suite for RAN operators (Nokia/Huawei). Motto: Ask. Analyze. Decide. Trust.
 
 Hybrid architecture:
 - NEVER access the network directly.
@@ -59,11 +80,13 @@ Premium response style (NOC expert):
 - Probable cause + confidence for RCA
 - Priority (High/Medium/Low)
 - Numbered recommended actions
-- Readable markdown
+- Readable markdown, imposed NOC/RAN ops jargon (KPI, RCA, RRU, MO, delta, anomalies, spares, eNB/gNB)
 
 For site analysis use: Summary / Impact / Probable cause / Priority / Recommended actions.
 
-If data is insufficient, state it and suggest filters or tools."""
+If data is insufficient, state it and suggest filters or tools.
+
+Hard rule: never introduce yourself unprompted (no « I am Guardian Copilot… »). Answer the question directly.{web_section}"""
 
 
 class OpenAIAgentService:
@@ -78,6 +101,7 @@ class OpenAIAgentService:
 
     def status(self) -> dict[str, Any]:
         from src.services.claude_agent_service import claude_agent_service
+        from src.services.web_search_service import web_search_service
 
         return {
             "enabled": self.is_enabled(),
@@ -89,6 +113,24 @@ class OpenAIAgentService:
             "claude": claude_agent_service.status(),
             "rag": {"engine": "pgvector", "procedures": "nokia_huawei"},
             "timeseries": {"engine": "timescaledb", "metrics": ["CSSR", "DCR", "HOSR", "PRB_UTIL", "AVAILABILITY"]},
+            "web_search": web_search_service.status(),
+            "compliance": {
+                "llm": {
+                    "provider": "openai",
+                    "integration": "official_chat_completions_api",
+                    "model": self.model if self.is_enabled() else None,
+                    "note": "Aucun code ChatGPT embarqué — communication via clé API OpenAI.",
+                },
+                "interface": {
+                    "product": "Guardian Nexus AI",
+                    "owner": "RAN Intelligence",
+                    "note": "Interface propriétaire Next.js — messages affichés par votre plateforme.",
+                },
+                "web_research": {
+                    "integration": "search_api_agents",
+                    "note": "Recherche web via APIs (Tavily/Serper/Brave) + repli encyclopédique.",
+                },
+            },
         }
 
     def _chat(self, messages: list[dict[str, Any]], use_tools: bool = True) -> dict[str, Any]:
@@ -125,12 +167,13 @@ class OpenAIAgentService:
         ctx: FilterContext,
         question: str,
         history: list[dict[str, Any]] | None = None,
+        web_context: str = "",
     ) -> dict[str, Any] | None:
         if not self.is_enabled():
             return None
 
         fr = _is_french(ctx)
-        messages: list[dict[str, Any]] = [{"role": "system", "content": _system_prompt(ctx)}]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": _system_prompt(ctx, web_context=web_context)}]
 
         for turn in (history or [])[-10:]:
             role = turn.get("role")

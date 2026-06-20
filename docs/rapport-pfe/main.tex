@@ -1,0 +1,1156 @@
+% ============================================================
+% RAPPORT DE STAGE — RAN Intelligence
+% Ooredoo Tunisie · ESPRIT School of Business · 2025/2026
+% Compilation : pdfLaTeX (Overleaf)
+% ============================================================
+\documentclass[12pt,a4paper]{report}
+
+% --- Mise en forme demandée ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{ragged2e}
+\AtBeginDocument{\justifying}
+\usepackage{setspace}
+\onehalfspacing
+\setlength{\parindent}{0.8cm}
+\setlength{\parskip}{6pt}
+\AtBeginDocument{\color{black}}
+
+% --- Packages ---
+\usepackage{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{etoc}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{tikz}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage[table]{xcolor}
+\usepackage{enumitem}
+\usetikzlibrary{positioning,shapes.geometric,arrows.meta}
+
+\geometry{left=2.6cm,right=2.4cm,top=2.4cm,bottom=2.4cm}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+
+\definecolor{ooredooRed}{RGB}{225,0,0}
+\definecolor{mainblack}{RGB}{18,18,18}
+\definecolor{darkText}{RGB}{30,30,30}
+\definecolor{softGray}{RGB}{245,245,245}
+\definecolor{darkred}{RGB}{160,0,0}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textbf{RAN Intelligence}}
+\fancyhead[R]{\small\textbf{Projet de Fin d'Études}}
+\fancyfoot[L]{\small\textbf{ESPRIT School of Business}}
+\fancyfoot[R]{\small Page \thepage}
+\renewcommand{\headrulewidth}{0.8pt}
+\renewcommand{\footrulewidth}{0.8pt}
+
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=darkred,citecolor=black}
+
+\titleformat{\chapter}[display]{\normalfont\bfseries}{
+\begin{tikzpicture}
+\node[anchor=west] at (0,0.85) {\small Chapitre};
+\node[fill=mainblack,text=white,minimum width=1.1cm,minimum height=1.3cm,font=\Huge\bfseries] at (0.55,0) {\thechapter};
+\end{tikzpicture}}{-1.3cm}{\hspace{1.7cm}\Huge}[\vspace{0.2cm}\noindent\rule{\textwidth}{0.8pt}]
+\titlespacing*{\chapter}{0pt}{0.4cm}{1.2cm}
+
+\titleformat{\section}{\normalfont\Large\bfseries}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{0.8em}{}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection}{0.8em}{}
+
+% --- Macros chapitres premium ---
+\newcommand{\ChapterTitlePage}[2]{%
+\clearpage\pagestyle{fancy}\thispagestyle{fancy}%
+\fancyhf{}\fancyfoot[L]{\small\textbf{ESPRIT School of Business}}%
+\fancyfoot[R]{\small Page \thepage}%
+\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.8pt}%
+\phantomsection\addcontentsline{toc}{chapter}{#1}%
+\vspace*{1.3cm}%
+\noindent\begin{minipage}[t]{1.05cm}{\small Chapitre}\\[0.1cm]%
+\colorbox{black}{\parbox[c][1.20cm][c]{0.78cm}{\centering\color{white}{\Huge\bfseries\thechapter}}}%
+\end{minipage}\hspace{0.35cm}%
+\begin{minipage}[t]{0.82\textwidth}\vspace{0.52cm}{\LARGE\bfseries #2}\\[0.18cm]\rule{\textwidth}{0.55pt}\end{minipage}%
+\vspace{1.3cm}}
+
+\newcommand{\ChapterTOC}[1]{%
+\noindent{\large\bfseries Sommaire}\vspace{0.15cm}\par\noindent\rule{\textwidth}{0.55pt}\vspace{0.25cm}%
+{\small\renewcommand{\arraystretch}{1.18}#1}\vspace{0.25cm}\par\noindent\rule{\textwidth}{0.55pt}}
+
+\newcommand{\PremiumIntroTitle}[1]{%
+\vspace*{1cm}{\LARGE\bfseries #1}\\[0.18cm]}
+
+\newcommand{\FigurePlaceholder}[2][0.92]{%
+\begin{figure}[H]\centering\fbox{\begin{minipage}{#1\textwidth}\centering\vspace{2.2cm}\small\textit{#2}\vspace{2.2cm}\end{minipage}}%
+\caption{\textbf{#2}}\end{figure}}
+
+\newcommand{\SprintBacklogTable}[2]{%
+\begin{longtable}{|p{1.2cm}|p{7.2cm}|p{1.4cm}|p{2.8cm}|p{1.4cm}|}%
+\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{ID}&\color{white}\textbf{User Story}&\color{white}\textbf{Priorité}&\color{white}\textbf{Statut}&\color{white}\textbf{Points}\\\hline\endhead
+#1\hline\end{longtable}\caption{\textbf{#2}}}
+
+% ============================================================
+\begin{document}
+% ============================================================
+
+% ---------- PAGE DE GARDE (inchangée) ----------
+\begin{titlepage}
+\newgeometry{left=2.1cm,right=2.1cm,top=1.15cm,bottom=1.15cm}
+\thispagestyle{empty}
+\vspace*{0.35cm}
+\begin{center}
+{\scriptsize\bfseries École Supérieure Privée de Management de Tunis}\\[-0.02cm]
+{\scriptsize\bfseries Esprit School of Business}
+\end{center}
+\vspace{0.65cm}
+\noindent
+\begin{minipage}{0.45\textwidth}\raggedright\hspace*{0.25cm}\includegraphics[width=4.4cm]{Assets/esblogo.png}\end{minipage}%
+\hfill\begin{minipage}{0.45\textwidth}\raggedleft\includegraphics[width=4.0cm]{Assets/oreedoologo.png}\hspace*{0.25cm}\end{minipage}
+\vspace{0.55cm}
+\begin{center}
+{\fontsize{31}{36}\selectfont\bfseries\textcolor{ooredooRed}{RAPPORT DE STAGE}}\\[-0.08cm]
+\textcolor{ooredooRed}{\rule{0.74\textwidth}{0.45pt}}\\[0.12cm]
+{\small En vue de l'obtention du diplôme de Licence en Business Computing}\\[0.28cm]
+{\normalsize\bfseries Parcours Business Information Systems}\\[0.18cm]
+\textcolor{ooredooRed}{\rule{0.74\textwidth}{0.45pt}}
+\end{center}
+\begin{center}
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{rl}
+\textbf{Soutenu le} & : \\[0.06cm]
+\textbf{Réalisé par} & : \textbf{Ben Ahmed Hanine}
+\end{tabular}
+\end{center}
+\vspace{1.25cm}
+\begin{center}
+{\large\bfseries « RAN Intelligence »}\\[0.25cm]
+\begin{minipage}{0.72\textwidth}\centering
+{\small\itshape
+Une plateforme décisionnelle intelligente dédiée à l'analyse, au contrôle et à la visualisation des données du réseau d'accès radio RAN Nokia et Huawei au sein d'Ooredoo Tunisie.
+}
+\end{minipage}\\[0.25cm]
+{\small\itshape 23/02/2026 -- 30/06/2026}
+\end{center}
+\vspace{1.05cm}
+\noindent\hspace*{0.45cm}
+\begin{tabular}{@{}p{4.4cm}p{8.8cm}@{}}
+\textbf{Maître de stage} & : M. Malek Nabil \\[0.18cm]
+\textbf{Encadrant académique} & : Mme Bouricha Hajer
+\end{tabular}
+\vfill
+\begin{center}{\scriptsize\bfseries Année universitaire 2025/2026}\end{center}
+\end{titlepage}
+\restoregeometry
+\clearpage
+
+% ---------- SIGNATURES (inchangée) ----------
+\clearpage\thispagestyle{empty}
+\definecolor{borderblue}{HTML}{000000}
+\begin{center}\color{borderblue}\rule{0.82\textwidth}{0.6pt}\vspace{0.18cm}
+{\Large\bfseries\color{borderblue} SIGNATURES}\vspace{0.18cm}\color{borderblue}\rule{0.82\textwidth}{0.6pt}\end{center}
+\vspace{1.15cm}
+\begin{center}\setlength{\arrayrulewidth}{0.6pt}\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{0.82\textwidth}|}\hline\centering\bfseries\MakeUppercase{Signataire}\tabularnewline\hline
+\begin{minipage}[c][1.7cm][c]{0.82\textwidth}\large Pour et au nom de : \textbf{Mme Bouricha Hajer}\end{minipage}\tabularnewline\hline
+\begin{minipage}[c][2.4cm][c]{0.82\textwidth}\begin{flushright}\begin{minipage}{0.38\textwidth}\centering\dotfill\\[0.18cm]\textit{Signature}\end{minipage}\end{flushright}\end{minipage}\tabularnewline\hline\end{tabular}\end{center}
+\vspace{1.15cm}
+\begin{center}\begin{tabular}{|p{0.82\textwidth}|}\hline\centering\bfseries\MakeUppercase{Signataire}\tabularnewline\hline
+\begin{minipage}[c][1.7cm][c]{0.82\textwidth}\large Pour et au nom de : \textbf{M. Malek Nabil}\end{minipage}\tabularnewline\hline
+\begin{minipage}[c][2.4cm][c]{0.82\textwidth}\begin{flushright}\begin{minipage}{0.38\textwidth}\centering\dotfill\\[0.18cm]\textit{Signature}\end{minipage}\end{flushright}\end{minipage}\tabularnewline\hline\end{tabular}\end{center}
+\vfill\begin{center}\color{borderblue}\rule{0.82\textwidth}{0.6pt}\end{center}
+\vspace{0.55cm}\noindent\hspace*{0.09\textwidth}\textit{RAN Intelligence}\hfill\textit{Projet de Fin d'Études}\hspace*{0.09\textwidth}
+\vspace{0.25cm}\begin{center}\color{borderblue}\rule{0.82\textwidth}{0.6pt}\end{center}
+
+% ---------- PAGES PRELIMINAIRES ----------
+\clearpage\pagenumbering{roman}\setcounter{page}{1}\pagestyle{fancy}
+
+% Dédicace (contenu original conservé — extrait structuré)
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Dédicace}
+\vspace*{1.2cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Dédicace}\\[-0.15cm]\color{black}\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{1.35cm}
+Ce travail n'est pas seulement l'aboutissement d'un parcours académique ; il est aussi le reflet d'un soutien familial constant, d'une confiance précieuse et d'un amour qui m'a accompagné dans chaque étape. Je le dédie avec une profonde reconnaissance à celles et ceux qui ont donné à ce chemin sa force, son sens et sa lumière.
+
+\begin{center}\textbf{\textit{À mon père, Jalel Ben Ahmed,}}\end{center}
+Pour ta présence constante, ta confiance silencieuse et la force que tu m'as transmise. Tu m'as appris à avancer avec courage et à croire en mes capacités. À toi, cher papa, j'adresse toute ma gratitude et mon profond respect.
+
+\begin{center}\textbf{\textit{À ma mère, Ikbel Ajili,}}\end{center}
+Pour ton exemple de courage, ton amour inconditionnel et ta confiance absolue. Derrière chaque étape franchie se cache une part de tes encouragements et de tes prières. Tu es mon modèle et ma plus grande fierté.
+
+\begin{center}\textbf{\textit{À ma sœur Nermine et à mon petit frère Arsolene,}}\end{center}
+Pour votre affection, votre énergie et la joie que vous apportez à notre famille.
+
+\begin{center}\textbf{\textit{À mes chères amies et à leurs familles,}}\end{center}
+À Syrine Jabbou, Farah Lourassi, Cyrine Ben Razzek, Siwar Abdelatif et Hedyle Znina, pour votre amitié sincère et votre présence réconfortante tout au long de ce parcours.
+
+\begin{center}\textbf{\textit{À ma grande famille,}}\end{center}
+Pour votre amour, vos prières et vos encouragements, même discrets, qui ont renforcé ma détermination.
+
+\begin{flushright}\textit{Avec toute ma gratitude et mon profond attachement.}\end{flushright}
+\clearpage
+
+% Remerciements
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Remerciements}
+\vspace*{1.2cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Remerciements}\\[-0.15cm]\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{1.35cm}
+Au terme de ce projet de fin d'études, j'exprime ma profonde reconnaissance à toutes les personnes qui ont contribué à sa réalisation.
+
+Je remercie sincèrement mon encadrante académique, \textbf{Mme Bouricha Hajer}, pour son suivi rigoureux, sa disponibilité et la qualité de ses orientations méthodologiques.
+
+J'adresse également ma gratitude à mon encadrant professionnel, \textbf{M. Malek Nabil}, pour son accueil, sa confiance et son expertise métier, qui m'ont permis de comprendre les enjeux opérationnels de la supervision RAN.
+
+Mes remerciements s'adressent à l'ensemble de l'équipe d'\textbf{Ooredoo Tunisie}, pour l'environnement professionnel enrichissant qu'elle m'a offert, ainsi qu'au corps enseignant de l'\textbf{ESPRIT School of Business}, pour la formation reçue.
+
+Enfin, je remercie ma famille et mes proches pour leur patience, leur soutien moral et leurs encouragements constants.
+
+\begin{flushright}\textit{À toutes et à tous, ma plus sincère gratitude.}\end{flushright}
+\clearpage
+
+% Résumé (contenu actualisé RAN Intelligence)
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Résumé}
+\vspace*{1.2cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Résumé}\\[-0.15cm]\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{1.35cm}
+Dans un contexte marqué par l'évolution rapide des infrastructures de télécommunications et par la croissance continue des volumes de données techniques, les opérateurs réseau doivent disposer de mécanismes d'analyse performants, fiables et intelligents. Le réseau d'accès radio (\textit{Radio Access Network -- RAN}) constitue un pilier stratégique de la qualité de service mobile.
+
+Ce projet de fin d'études porte sur la conception et le développement de \textbf{RAN Intelligence}, une plateforme décisionnelle premium dédiée à la supervision, à l'analyse et à l'exploitation des snapshots XML émis par les équipements \textbf{Nokia} et \textbf{Huawei}. La solution repose sur une architecture moderne \textbf{FastAPI / Next.js}, un pipeline de données \textbf{XML $\rightarrow$ Parquet $\rightarrow$ DuckDB}, ainsi qu'un module \textbf{Guardian Copilot} combinant moteurs métier, détection d'anomalies et assistant conversationnel contrôlé.
+
+La plateforme automatise l'ingestion quotidienne, centralise l'inventaire matériel, compare les évolutions inter-snapshots (\textit{Delta}), produit des indicateurs de qualité et de risque, et propose une authentification entreprise sécurisée (JWT, MFA, bootstrap administrateur). Elle constitue un outil d'aide à la décision destiné aux équipes NOC et aux responsables d'exploitation réseau d'Ooredoo Tunisie.
+\clearpage
+
+% Mots-clés
+\thispagestyle{plain}\vspace*{2.2cm}
+\noindent\hspace*{0.2cm}\begin{minipage}{0.86\textwidth}
+{\normalsize\bfseries Mots-clés :}\vspace{0.2cm}\par\noindent\rule{0.62\textwidth}{0.4pt}\vspace{0.6cm}
+\small\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{0.38\textwidth}@{\hspace{1.1cm}}p{0.38\textwidth}@{}}
+\textendash\hspace{0.18cm} RAN & \textendash\hspace{0.18cm} Intelligence artificielle \\
+\textendash\hspace{0.18cm} Nokia / Huawei & \textendash\hspace{0.18cm} FastAPI / Next.js \\
+\textendash\hspace{0.18cm} XML & \textendash\hspace{0.18cm} DuckDB / Parquet \\
+\textendash\hspace{0.18cm} Guardian Copilot & \textendash\hspace{0.18cm} Authentification MFA \\
+\textendash\hspace{0.18cm} Télécommunications & \textendash\hspace{0.18cm} Data Engineering \\
+\textendash\hspace{0.18cm} Supervision réseau & \textendash\hspace{0.18cm} Aide à la décision \\
+\end{tabular}\end{minipage}\clearpage
+
+% Abstract
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Abstract}
+\vspace*{1.2cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Abstract}\\[-0.15cm]\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{1.35cm}
+In a telecommunications environment characterized by growing technical data volumes and increasing network complexity, operators require efficient, reliable and intelligent analysis mechanisms. The Radio Access Network (\textit{RAN}) is a strategic layer for service availability and operational performance.
+
+This final-year project focuses on the design and development of \textbf{RAN Intelligence}, a premium decision-support platform for monitoring, analyzing and exploiting XML snapshots produced by \textbf{Nokia} and \textbf{Huawei} equipment. The solution relies on a modern \textbf{FastAPI / Next.js} architecture, an \textbf{XML $\rightarrow$ Parquet $\rightarrow$ DuckDB} data pipeline, and a \textbf{Guardian Copilot} module combining business engines, anomaly detection and a controlled conversational assistant.
+
+The platform automates daily ingestion, centralizes hardware inventory, compares inter-snapshot evolutions, generates quality and risk indicators, and provides enterprise-grade authentication (JWT, MFA, admin bootstrap). It constitutes a decision-support tool for NOC teams and network operations managers at Ooredoo Tunisia.
+\clearpage
+
+% Keywords
+\thispagestyle{plain}\vspace*{2.2cm}
+\noindent\hspace*{0.2cm}\begin{minipage}{0.86\textwidth}
+{\normalsize\bfseries Keywords:}\vspace{0.2cm}\par\noindent\rule{0.62\textwidth}{0.4pt}\vspace{0.6cm}
+\small\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{0.38\textwidth}@{\hspace{1.1cm}}p{0.38\textwidth}@{}}
+\textendash\hspace{0.18cm} RAN & \textendash\hspace{0.18cm} Artificial Intelligence \\
+\textendash\hspace{0.18cm} Nokia / Huawei & \textendash\hspace{0.18cm} FastAPI / Next.js \\
+\textendash\hspace{0.18cm} XML & \textendash\hspace{0.18cm} DuckDB / Parquet \\
+\textendash\hspace{0.18cm} Guardian Copilot & \textendash\hspace{0.18cm} MFA Authentication \\
+\textendash\hspace{0.18cm} Telecommunications & \textendash\hspace{0.18cm} Data Engineering \\
+\end{tabular}\end{minipage}\clearpage
+
+% Liste des abréviations
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Liste des abréviations}
+\vspace*{1.2cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Liste des abréviations}\\[-0.15cm]\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{1.0cm}
+\renewcommand{\arraystretch}{1.28}
+\small
+\begin{longtable}{@{}p{3.4cm}p{10.3cm}@{}}
+\toprule
+\textbf{Abréviation} & \textbf{Signification} \\
+\midrule
+\endhead
+\multicolumn{2}{r}{\textit{Suite page suivante}} \\
+\midrule
+\endfoot
+\bottomrule
+\endlastfoot
+% --- Plateforme & organisation ---
+\textbf{RAN Intelligence} & Nom de la plateforme décisionnelle développée dans le cadre du PFE \\
+\textbf{RAN Guardian Copilot} & Copilote IA contrôlé de la plateforme (assistant + moteurs métier) \\
+\textbf{PFE} & \textit{Projet de Fin d'Études} \\
+\textbf{ESPRIT / ESB} & \textit{Esprit School of Business} — établissement d'accueil académique \\
+\textbf{BIS} & \textit{Business Information Systems} — parcours Business Computing \\
+\textbf{NOC} & \textit{Network Operations Center} — centre d'exploitation et de supervision réseau \\
+\textbf{Scrum} & Méthode agile de gestion de projet par sprints \\
+\textbf{UML} & \textit{Unified Modeling Language} — langage de modélisation logicielle \\
+% --- Réseau mobile & RAN ---
+\textbf{RAN} & \textit{Radio Access Network} — réseau d'accès radio \\
+\textbf{BTS} & \textit{Base Transceiver Station} — station de base radio \\
+\textbf{MRBTS} & \textit{Multi-Radio BTS} — identifiant site Nokia dans les exports XML \\
+\textbf{LNBTS} & \textit{LTE Node BTS} — nœud LTE Nokia \\
+\textbf{PLMN} & \textit{Public Land Mobile Network} — réseau mobile public (identifiant opérateur) \\
+\textbf{SRBTS} & \textit{Single Radio BTS} — famille d'objets Nokia dans le modèle XML \\
+\textbf{DN} & \textit{Distinguished Name} — identifiant hiérarchique d'un objet réseau Nokia \\
+\textbf{2G / GSM} & Seconde génération mobile (\textit{Global System for Mobile Communications}) \\
+\textbf{3G / WCDMA} & Troisième génération (\textit{Wideband Code Division Multiple Access}) \\
+\textbf{4G / LTE} & Quatrième génération (\textit{Long Term Evolution}) \\
+\textbf{5G / NR} & Cinquième génération (\textit{New Radio}) \\
+\textbf{FDD} & \textit{Frequency Division Duplex} — duplexage par fréquence (ex. LTE FDD) \\
+\textbf{TDD} & \textit{Time Division Duplex} — duplexage par répartition temporelle (ex. LTE TDD) \\
+\textbf{GNCEL} & Cellule GSM Nokia (objet \texttt{com.nokia.srbts.gsm:GNCEL}) \\
+\textbf{WNCEL} & Cellule WCDMA Nokia \\
+\textbf{NRCELL} & Cellule 5G Nokia \\
+% --- Équipements & inventaire ---
+\textbf{CABINET} & Armoire / châssis site radio \\
+\textbf{SMOD} & \textit{System Module} — module système Nokia \\
+\textbf{RMOD} & \textit{Radio Module} — module radio (RRH / antenne radio) \\
+\textbf{BBMOD} & \textit{Baseband Module} — module bande de base \\
+\textbf{RETU} & \textit{Remote Electrical Tilt Unit} — inclinaison électrique d'antenne \\
+\textbf{ALD} & \textit{Antenna Line Device} — dispositif de ligne d'antenne \\
+\textbf{ANTL} & \textit{Antenna Line} — ligne d'antenne \\
+\textbf{SN / Serial} & Numéro de série matériel (\textit{serial number}) \\
+\textbf{VSWR} & \textit{Voltage Standing Wave Ratio} — rapport d'onde stationnaire (qualité RF) \\
+\textbf{SW} & \textit{Software} — version logicielle site / équipement \\
+% --- KPI & performance réseau ---
+\textbf{KPI} & \textit{Key Performance Indicator} — indicateur clé de performance \\
+\textbf{PM} & \textit{Performance Management} — gestion / mesure des performances réseau \\
+\textbf{CSSR} & \textit{Call Setup Success Rate} — taux de succès d'établissement d'appel \\
+\textbf{DCR} & \textit{Dropped Call Rate} — taux d'appels coupés \\
+\textbf{HOSR} & \textit{Handover Success Rate} — taux de succès des handovers \\
+\textbf{PRB} & \textit{Physical Resource Block} — bloc de ressource physique LTE \\
+\textbf{OOS} & \textit{Out Of Service} — hors service (site ou cellule indisponible) \\
+\textbf{RCA} & \textit{Root Cause Analysis} — analyse de cause racine \\
+% --- Données & pipeline ---
+\textbf{XML} & \textit{eXtensible Markup Language} — format des snapshots Nokia/Huawei \\
+\textbf{CSV} & \textit{Comma-Separated Values} — export tabulaire (Power BI, Excel) \\
+\textbf{JSON} & \textit{JavaScript Object Notation} — format d'échange API \\
+\textbf{Parquet} & Format columnar compressé du data lake analytique \\
+\textbf{ETL} & \textit{Extract, Transform, Load} — extraction, transformation, chargement \\
+\textbf{Snapshot} & Instantané daté de l'état du réseau (dossier \texttt{YYYY.MM.DD}) \\
+\textbf{J-1} & Snapshot du jour précédent (contrat d'ingestion quotidienne) \\
+\textbf{J+3} & Horizon de prédiction de risque à trois jours (moteur prédictif) \\
+\textbf{Delta} & Écart / comparaison entre deux snapshots consécutifs \\
+\textbf{Bronze / Silver / Gold} & Zones du modèle \textit{medallion} : brut, normalisé, agrégé \\
+\textbf{Data Trust} & Chaîne de confiance : hash, ancrage et audit d'intégrité des snapshots \\
+% --- Architecture & stack technique ---
+\textbf{API} & \textit{Application Programming Interface} — interface de programmation \\
+\textbf{REST} & \textit{Representational State Transfer} — style d'API HTTP \\
+\textbf{FastAPI} & Framework Python de l'API backend \\
+\textbf{Next.js} & Framework React de l'interface web premium \\
+\textbf{Streamlit} & Interface Python legacy (prototype initial) \\
+\textbf{DuckDB} & Moteur SQL analytique embarqué sur fichiers Parquet \\
+\textbf{PostgreSQL / PG} & SGBD relationnel (auth, spares, knowledge) \\
+\textbf{SQLite} & SGBD embarqué (mode développement) \\
+\textbf{TimescaleDB} & Extension PostgreSQL pour séries temporelles KPI \\
+\textbf{Redis} & Cache mémoire distribué pour requêtes répétées \\
+\textbf{MinIO} & Stockage objet compatible S3 (migration big-data) \\
+\textbf{Spark} & Moteur de traitement distribué (batch lourd) \\
+\textbf{Docker} & Conteneurisation des services (API, frontend, infra) \\
+\textbf{CI/CD} & \textit{Continuous Integration / Continuous Deployment} \\
+\textbf{DevOps / Ops} & Pratiques d'intégration développement–exploitation (page \texttt{/ops}) \\
+\textbf{p95 / p99} & Percentiles 95 / 99 de latence requête (observabilité) \\
+% --- Sécurité & authentification ---
+\textbf{JWT} & \textit{JSON Web Token} — jeton d'authentification (access / refresh) \\
+\textbf{MFA} & \textit{Multi-Factor Authentication} — authentification multifacteur \\
+\textbf{OTP} & \textit{One-Time Password} — code à usage unique (email / SMS) \\
+\textbf{SHA-256} & Algorithme de hachage pour empreinte des fichiers XML \\
+\textbf{bcrypt} & Algorithme de hachage des mots de passe \\
+\textbf{CORS} & \textit{Cross-Origin Resource Sharing} — politique d'accès inter-origines \\
+\textbf{RBAC} & \textit{Role-Based Access Control} — contrôle d'accès par rôle (\texttt{admin} / \texttt{user}) \\
+% --- Intelligence artificielle ---
+\textbf{IA / AI} & \textit{Intelligence Artificielle / Artificial Intelligence} \\
+\textbf{LLM} & \textit{Large Language Model} — grand modèle de langage (GPT-4o, Claude) \\
+\textbf{GPT-4o} & Modèle OpenAI utilisé par l'assistant premium \\
+\textbf{RAG} & \textit{Retrieval-Augmented Generation} — génération augmentée par base documentaire \\
+\textbf{pgvector} & Extension PostgreSQL pour recherche vectorielle (RAG avancé, prévu) \\
+\textbf{HITL} & \textit{Human-in-the-Loop} — validation humaine avant action opérationnelle \\
+\textbf{Guardian} & Suite des 4 moteurs : intégrité, changements, anomalies, risques \\
+% --- Modules & pages applicatives ---
+\textbf{Guardian Copilot} & Orchestrateur des moteurs métier post-ingestion \\
+\textbf{Data Integrity Engine} & Moteur d'audit et validation des snapshots \\
+\textbf{Change Intelligence} & Moteur de détection des changements inter-snapshots \\
+\textbf{Anomaly Intelligence} & Moteur de détection d'anomalies (règles + statistiques) \\
+\textbf{Predictive Risk Engine} & Moteur de score de risque prédictif \\
+\textbf{Assets} & Distribution et analyse des actifs réseau (product codes, serials) \\
+\textbf{Spares} & Suivi et dimensionnement des pièces de rechange \\
+\textbf{Clustering} & Regroupement automatique de sites / équipements \\
+\textbf{IndexedDB} & Base locale navigateur pour historique conversations IA \\
+% --- Visualisation & reporting ---
+\textbf{UI / UX} & \textit{User Interface / User Experience} \\
+\textbf{Power BI / PBI} & Outil Microsoft de business intelligence et tableaux de bord \\
+\textbf{DAX} & \textit{Data Analysis Expressions} — langage de mesures Power BI \\
+\textbf{PDF} & \textit{Portable Document Format} — export rapport assistant IA \\
+\textbf{Excel} & Export tableur depuis les grilles de données \\
+\textbf{KPI Cards} & Cartes d'indicateurs sur le dashboard exécutif \\
+% --- Vendor & opérateur ---
+\textbf{Nokia} & Fournisseur RAN principal (flux XML connecté) \\
+\textbf{Huawei} & Second fournisseur RAN (architecture prête, flux en attente) \\
+\textbf{FR / EN} & Locales interface : Français / English \\
+\end{longtable}
+\normalsize
+\clearpage
+
+% Table des matières
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Table des matières}
+\vspace*{0.8cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Table des matières}\\[-0.15cm]\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{0.8cm}
+\tableofcontents
+\clearpage
+
+% Liste des figures
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Liste des figures}
+\vspace*{0.8cm}
+{\LARGE\bfseries Liste des figures}\vspace{0.8cm}
+\listoffigures
+\clearpage
+
+% Liste des tableaux
+\thispagestyle{plain}\phantomsection\addcontentsline{toc}{chapter}{Liste des tableaux}
+\vspace*{0.8cm}
+{\LARGE\bfseries Liste des tableaux}\vspace{0.8cm}
+\listoftables
+\clearpage
+
+\pagenumbering{arabic}\setcounter{page}{1}
+
+% ============================================================
+% INTRODUCTION GENERALE
+% ============================================================
+\clearpage\pagestyle{fancy}\thispagestyle{fancy}
+\phantomsection\addcontentsline{toc}{chapter}{Introduction générale}
+\vspace*{1.2cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Introduction générale}\\[-0.15cm]\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{1.35cm}
+
+Les réseaux de télécommunications connaissent une mutation accélérée, portée par l'augmentation du trafic mobile, la densification des sites radio et la complexification des inventaires matériels. Dans ce contexte, le suivi du \textbf{RAN} (\textit{Radio Access Network}) constitue un enjeu majeur pour garantir la disponibilité du réseau, la qualité de service et l'efficacité des opérations de maintenance.
+
+Le présent projet de fin d'études, réalisé au sein d'\textbf{Ooredoo Tunisie}, porte sur la conception et la mise en œuvre de \textbf{RAN Intelligence}, une plateforme décisionnelle premium destinée à automatiser l'exploitation des fichiers techniques \textbf{XML}, à centraliser la supervision des sites et à accompagner les équipes NOC dans leurs analyses quotidiennes.
+
+Historiquement, l'exploitation de ces données reposait sur des traitements manuels, fragmentés et peu scalables. Or, chaque snapshot quotidien recèle des informations stratégiques : états opérationnels, adresses IP, versions logicielles, inventaires matériels, remplacements et anomalies de qualité. L'absence d'un socle unifié limitait la réactivité des équipes et complexifiait la prise de décision.
+
+La solution développée répond à cette lacune en proposant une architecture \textbf{full-stack} moderne, articulée autour d'une API \textbf{FastAPI}, d'une interface \textbf{Next.js}, d'un pipeline analytique \textbf{Parquet/DuckDB} et d'un module \textbf{Guardian Copilot} intégrant détection métier et assistant IA contrôlé. Elle couvre également l'authentification entreprise, la comparaison inter-snapshots, la qualité des données, la distribution des actifs et l'analyse prédictive.
+
+Ce rapport est structuré en six chapitres. Les deux premiers présentent le cadre organisationnel, l'analyse des besoins et l'architecture retenue. Les chapitres 3 à 6 décrivent la réalisation incrémentale selon une démarche \textbf{Agile Scrum}, du socle d'authentification à l'industrialisation de la plateforme. Une conclusion générale synthétise les apports du projet et les perspectives d'évolution.
+
+\clearpage
+
+% ============================================================
+% CHAPITRE 1 — contenu professionnel (structure conservée)
+% ============================================================
+\ChapterTitlePage{Présentation de l'Entreprise et Cadre du Projet}{Présentation de l'Entreprise\\ et Cadre du Projet}
+
+\ChapterTOC{%
+\begin{tabular}{@{}p{0.08\textwidth}p{0.78\textwidth}r@{}}
+& \textbf{Introduction}\dotfill & \textbf{\pageref{sec:ch1-intro}} \\
+1 & \textbf{Présentation de l'entreprise}\dotfill & \textbf{\pageref{sec:ch1-entreprise}} \\
+& \hspace{0.45cm}1.1 \quad Présentation générale\dotfill & \pageref{sec:ch1-presentation} \\
+& \hspace{0.45cm}1.2 \quad Domaine d'activité\dotfill & \pageref{sec:ch1-domaine} \\
+& \hspace{0.45cm}1.3 \quad Organisation interne\dotfill & \pageref{sec:ch1-org} \\
+2 & \textbf{Cadre du projet}\dotfill & \textbf{\pageref{sec:ch1-cadre}} \\
+& \hspace{0.45cm}2.1 \quad Contexte général\dotfill & \pageref{sec:ch1-contexte} \\
+& \hspace{0.45cm}2.2 \quad Étude de l'existant\dotfill & \pageref{sec:ch1-existant} \\
+& \hspace{0.45cm}2.3 \quad Problématique\dotfill & \pageref{sec:ch1-problematique} \\
+& \hspace{0.45cm}2.4 \quad Solution proposée\dotfill & \pageref{sec:ch1-solution} \\
+3 & \textbf{Méthodologies}\dotfill & \textbf{\pageref{sec:ch1-methodo}} \\
+& \hspace{0.45cm}3.1 \quad Méthodologies traditionnelle et agile\dotfill & \pageref{sec:ch1-trad-agile} \\
+& \hspace{0.45cm}3.2 \quad Différentes méthodes agiles\dotfill & \pageref{sec:ch1-agiles} \\
+& \hspace{0.45cm}3.3 \quad Étude comparative\dotfill & \pageref{sec:ch1-comparatif} \\
+& \hspace{0.45cm}3.4 \quad Méthodologie adaptée : Scrum\dotfill & \pageref{sec:ch1-scrum} \\
+& \textbf{Conclusion}\dotfill & \textbf{\pageref{sec:ch1-conclusion}} \\
+\end{tabular}}
+
+\clearpage
+\fancyhead[L]{\small\textbf{Présentation de l'Entreprise et Cadre du Projet}}
+
+\section*{Introduction}\label{sec:ch1-intro}
+\addcontentsline{toc}{section}{Introduction}
+\PremiumIntroTitle{}
+
+À l'ère de la transformation numérique des opérateurs télécoms, la supervision des infrastructures \textbf{RAN} devient un facteur différenciant de performance opérationnelle. Le présent chapitre situe le projet \textbf{RAN Intelligence} dans son environnement professionnel, présente l'organisme d'accueil et formalise le cadre méthodologique retenu pour conduire le développement.
+
+\section{Présentation de l'entreprise}\label{sec:ch1-entreprise}
+
+\subsection{Présentation générale}\label{sec:ch1-presentation}
+\textbf{Ooredoo Tunisie} occupe une position de premier plan sur le marché national des télécommunications. Filiale du groupe \textbf{Ooredoo}, l'opérateur s'appuie sur une stratégie d'innovation continue, de modernisation des réseaux mobiles et d'amélioration de l'expérience client. Son portefeuille couvre la téléphonie mobile, l'Internet haut débit, les services data et les offres destinées aux entreprises.
+
+Le déploiement successif des technologies \textbf{3G, 4G et 5G}, conjugué à l'extension du parc radio, génère des volumes croissants de données techniques. Cette dynamique justifie l'investissement dans des outils internes de supervision, d'analyse et d'aide à la décision — domaine dans lequel s'inscrit directement \textbf{RAN Intelligence}.
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.95\textwidth]{images/ooredoo_company.png}
+\caption{\textbf{Présentation générale de l'opérateur Ooredoo Tunisie}}
+\label{fig:ooredoo}
+\end{figure}
+
+\subsection{Domaine d'activité}\label{sec:ch1-domaine}
+Le cœur de métier d'Ooredoo Tunisie repose sur l'exploitation, l'optimisation et l'évolution des infrastructures de connectivité mobile. Les activités stratégiques incluent notamment :
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item le déploiement et la gestion des réseaux \textbf{2G/3G/4G/5G} ;
+    \item la supervision des équipements radio et des sites ;
+    \item l'optimisation de la qualité de service et de la disponibilité ;
+    \item la maintenance corrective et préventive du parc matériel ;
+    \item la fourniture de services numériques et de solutions B2B.
+\end{itemize}
+Le \textbf{RAN} constitue, de ce fait, un maillon critique entre l'infrastructure physique et la qualité perçue par l'abonné.
+
+\subsection{Organisation interne}\label{sec:ch1-org}
+L'organisation interne repose sur des directions techniques spécialisées coordonnant planification, exploitation et maintenance. Le projet a été mené au contact des équipes en charge de la supervision RAN, dont les missions couvrent :
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item le suivi opérationnel des sites radio ;
+    \item l'analyse des équipements \textbf{Nokia} et \textbf{Huawei} ;
+    \item la gestion des inventaires et des remplacements ;
+    \item l'identification des anomalies et des évolutions d'infrastructure.
+\end{itemize}
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.97\textwidth]{images/ran_architecture_red_white.png}
+\caption{\textbf{Architecture simplifiée d'un réseau mobile RAN}}
+\label{fig:ran_architecture}
+\end{figure}
+
+\section{Cadre du projet}\label{sec:ch1-cadre}
+
+\subsection{Contexte général}\label{sec:ch1-contexte}
+Les équipements RAN produisent quotidiennement des fichiers \textbf{XML} structurés, déposés sur un serveur interne selon une organisation temporelle (\textit{snapshot J-1}). Ces fichiers décrivent l'état des sites, les inventaires, les compteurs et les indicateurs de qualité. Dans un contexte multi-vendor (\textbf{Nokia}, \textbf{Huawei}), l'hétérogénéité des formats et le volume des données imposent une automatisation robuste.
+
+\subsection{Étude de l'existant}\label{sec:ch1-existant}
+Avant \textbf{RAN Intelligence}, l'analyse reposait sur des traitements manuels, des extractions ponctuelles et des outils non centralisés. Les principales limites identifiées sont :
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item absence de vue consolidée multi-snapshots ;
+    \item lenteur d'analyse et risque d'erreurs humaines ;
+    \item faible traçabilité des changements matériels ;
+    \item absence de mécanismes proactifs de détection ;
+    \item pas de couche d'authentification unifiée pour les usages internes.
+\end{itemize}
+
+\subsection{Problématique}\label{sec:ch1-problematique}
+\begin{center}
+\textit{Comment concevoir une plateforme centralisée, sécurisée et évolutive capable d'automatiser l'exploitation des snapshots XML RAN, d'en améliorer la supervision et d'en accélérer l'analyse décisionnelle ?}
+\end{center}
+Les enjeux associés concernent l'automatisation, la fiabilité des données, la réactivité opérationnelle, la gouvernance des accès et l'intégration maîtrisée de l'intelligence artificielle.
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.98\textwidth]{images/problematic_ran_red_white.png}
+\caption{\textbf{Principales problématiques de la supervision RAN}}
+\label{fig:problematic_ran}
+\end{figure}
+
+\subsection{Solution proposée}\label{sec:ch1-solution}
+\textbf{RAN Intelligence} est une plateforme web premium articulée autour de :
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item un \textbf{pipeline de données} XML $\rightarrow$ Parquet $\rightarrow$ DuckDB ;
+    \item une \textbf{API FastAPI} exposant les services analytiques ;
+    \item une \textbf{interface Next.js} multilingue (FR/EN) ;
+    \item un module \textbf{Guardian Copilot} (intégrité, changements, anomalies, risques, assistant IA) ;
+    \item un \textbf{socle d'authentification} entreprise (JWT, MFA, bootstrap admin).
+\end{itemize}
+
+\section{Méthodologies}\label{sec:ch1-methodo}
+
+\subsection{Méthodologies traditionnelle et agile}\label{sec:ch1-trad-agile}
+Les approches \textbf{traditionnelles} (cycle en V, cascade) privilégient une planification exhaustive en amont et une documentation lourde. Elles conviennent aux projets stables, mais peinent à absorber les évolutions fréquentes des besoins métier.
+
+Les approches \textbf{agiles} favorisent des itérations courtes, une collaboration continue et une livraison incrémentale de valeur. Dans un projet explorant simultanément pipeline de données, UX premium et IA contrôlée, cette flexibilité s'est révélée indispensable.
+
+\begin{table}[H]\centering\caption{\textbf{Comparaison méthodologie traditionnelle vs agile}}\label{tab:comparaison_methodologies}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{|p{3.3cm}|p{5.8cm}|p{5.8cm}|}
+\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{Critère}&\color{white}\textbf{Traditionnelle}&\color{white}\textbf{Agile}\\\hline
+Organisation & Phases séquentielles & Itérations courtes (Sprints) \\\hline
+Besoins & Figés en amont & Évolutifs et priorisés \\\hline
+Livraison & Unique en fin de projet & Incrémentale \\\hline
+Risques & Détection tardive & Levée progressive \\\hline
+\end{tabular}\end{table}
+
+\subsection{Différentes méthodes agiles}\label{sec:ch1-agiles}
+
+\subsubsection{Scrum}
+Organisation en \textit{Sprints}, rôles définis (Product Owner, Scrum Master, équipe), cérémonies (\textit{Daily}, \textit{Review}, \textit{Retrospective}). Adapté aux livraisons fonctionnelles régulières.
+
+\subsubsection{Kanban}
+Visualisation du flux de tâches, limitation du \textit{work in progress}, forte réactivité. Moins structuré pour la planification par incréments.
+
+\subsubsection{Extreme Programming (XP)}
+Accent sur la qualité logicielle : tests automatisés, intégration continue, \textit{pair programming}. Exigeante techniquement.
+
+\subsection{Étude comparative des méthodes agiles}\label{sec:ch1-comparatif}
+L'analyse comparative a mis en évidence que \textbf{Scrum} offre le meilleur compromis entre structure, visibilité et capacité d'adaptation pour un projet full-stack data + IA.
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.98\textwidth]{images/agile_methods_comparison_red_white.png}
+\caption{\textbf{Étude comparative des méthodes agiles}}
+\label{fig:agile_methods_comparison}
+\end{figure}
+
+\subsection{Méthodologie adaptée : Agile Scrum}\label{sec:ch1-scrum}
+Le projet a été découpé en \textbf{cinq sprints} : (1) authentification, (2) ingestion, (3) dashboards analytiques, (4) Guardian \& risques, (5) assistant IA \& industrialisation. Chaque sprint a produit un incrément démontrable et validé avec l'encadrant métier.
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.98\textwidth]{images/scrum_method_red_white.png}
+\caption{\textbf{Méthode agile Scrum adoptée}}
+\label{fig:scrum_method}
+\end{figure}
+
+\section*{Conclusion}\label{sec:ch1-conclusion}
+\addcontentsline{toc}{section}{Conclusion}
+Ce chapitre a situé \textbf{RAN Intelligence} dans l'écosystème d'Ooredoo Tunisie, formalisé la problématique de supervision RAN et justifié le choix d'une démarche \textbf{Scrum}. Le chapitre suivant décline les besoins, l'architecture et l'organisation fonctionnelle de la solution.
+
+\clearpage
+
+% ============================================================
+% CHAPITRE 2 — Analyse et Spécification des Besoins
+% ============================================================
+\ChapterTitlePage{Analyse et Spécification des Besoins}{Analyse et Spécification\\ des Besoins du Projet}
+
+\ChapterTOC{%
+\begin{tabular}{@{}p{0.08\textwidth}p{0.78\textwidth}r@{}}
+& \textbf{Introduction}\dotfill & \textbf{\pageref{sec:ch2-intro}} \\
+1 & \textbf{Identification des acteurs et analyse des besoins}\dotfill & \textbf{\pageref{sec:ch2-acteurs}} \\
+& \hspace{0.45cm}1.1 \quad Identification des acteurs\dotfill & \pageref{sec:ch2-acteurs-id} \\
+& \hspace{0.45cm}1.2 \quad Établissement des besoins\dotfill & \pageref{sec:ch2-besoins} \\
+2 & \textbf{Architecture technique}\dotfill & \textbf{\pageref{sec:ch2-archi}} \\
+& \hspace{0.45cm}2.1 \quad Types d'architectures\dotfill & \pageref{sec:ch2-types} \\
+& \hspace{0.45cm}2.2 \quad Langage de modélisation\dotfill & \pageref{sec:ch2-uml} \\
+& \hspace{0.45cm}2.3 \quad Technologies utilisées\dotfill & \pageref{sec:ch2-tech} \\
+3 & \textbf{Gestion du projet}\dotfill & \textbf{\pageref{sec:ch2-gestion}} \\
+4 & \textbf{Organisation fonctionnelle}\dotfill & \textbf{\pageref{sec:ch2-backlog}} \\
+5 & \textbf{Diagramme de classes}\dotfill & \textbf{\pageref{sec:ch2-classes}} \\
+& \textbf{Conclusion}\dotfill & \textbf{\pageref{sec:ch2-conclusion}} \\
+\end{tabular}}
+
+\clearpage
+\fancyhead[L]{\small\textbf{Analyse et Spécification des Besoins}}
+
+\section*{Introduction}\label{sec:ch2-intro}
+\addcontentsline{toc}{section}{Introduction}
+Ce chapitre traduit les attentes métier en spécifications structurées. Il définit les acteurs, les besoins fonctionnels et non fonctionnels, l'architecture technique retenue, l'organisation Scrum et la modélisation UML de la plateforme \textbf{RAN Intelligence}.
+
+\section{Identification des acteurs et analyse des besoins}\label{sec:ch2-acteurs}
+
+\subsection{Identification des acteurs}\label{sec:ch2-acteurs-id}
+Deux profils principaux structurent la gouvernance applicative :
+
+\begin{description}[leftmargin=1.2cm,style=nextline]
+\item[\textbf{Administrateur}] Dispose de privilèges complets : bootstrap initial, gestion des utilisateurs, import XML, suppression de snapshots, accès Ops/Guardian, configuration des clés d'accès.
+\item[\textbf{Utilisateur}] Accès consultatif et analytique : sites, inventaire, assets, qualité, delta, assistant IA (selon permissions). Aucune modification destructive des données sources.
+\end{description}
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=1.6cm,every node/.style={font=\small}]
+\node[draw,rounded corners,minimum width=3.2cm,minimum height=0.9cm,fill=red!8] (admin) {Administrateur};
+\node[draw,rounded corners,minimum width=3.2cm,minimum height=0.9cm,fill=red!8,below=of admin] (user) {Utilisateur};
+\node[draw,rounded corners,minimum width=4.8cm,minimum height=1.1cm,fill=softGray,below=1.8cm of admin] (sys) {Plateforme RAN Intelligence};
+\draw[-{Stealth},thick,red!70] (admin) -- (sys);
+\draw[-{Stealth},thick,red!70] (user) -- (sys);
+\end{tikzpicture}
+\caption{\textbf{Acteurs principaux du système}}
+\label{fig:acteurs}
+\end{figure}
+
+\subsection{Établissement des besoins}\label{sec:ch2-besoins}
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.82\textwidth]{images/system_requirements_red_white.png}
+\caption{\textbf{Catégories de besoins du système}}
+\label{fig:system_requirements}
+\end{figure}
+
+\subsubsection{Besoins fonctionnels}
+\begin{enumerate}[leftmargin=*,itemsep=3pt]
+    \item \textbf{Ingestion XML} : découverte automatique des snapshots, parsing Nokia/Huawei, chargement Parquet.
+    \item \textbf{Supervision sites} : états opérationnels, IP, SW, technologies, KPI par site.
+    \item \textbf{Inventaire \& assets} : consultation paginée, filtres avancés, dédoublonnage serial.
+    \item \textbf{Delta \& remplacements} : comparaison inter-dates, cartographie des changements matériels.
+    \item \textbf{Qualité \& anomalies} : complétude, serials manquants/dupliqués, cartes à risque.
+    \item \textbf{Guardian Copilot} : intégrité, changements, anomalies, risques prédictifs.
+    \item \textbf{Assistant IA} : dialogue contrôlé, RCA site, recherche procédurale (RAG).
+    \item \textbf{Authentification} : JWT, MFA email/SMS, bootstrap admin, gestion des rôles.
+\end{enumerate}
+
+\subsubsection{Besoins non fonctionnels}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \textbf{Performance} : requêtes analytiques sur Parquet via DuckDB, pagination, cache Redis.
+    \item \textbf{Sécurité} : hachage bcrypt, OTP, rate limiting, séparation admin/user.
+    \item \textbf{Fiabilité} : chaînage d'intégrité (Data Trust), validation post-ingestion.
+    \item \textbf{Ergonomie} : interface premium Ooredoo, i18n FR/EN, tableaux virtualisés.
+    \item \textbf{Évolutivité} : architecture modulaire, Docker, CI/CD, migration big-data (Spark/MinIO).
+    \item \textbf{Observabilité} : métriques API, OpenTelemetry, Sentry.
+\end{itemize}
+
+\section{Architecture technique de la solution proposée}\label{sec:ch2-archi}
+
+\begin{flushleft}
+
+L'architecture technique constitue un pilier structurant du projet \textbf{RAN Intelligence}. Elle formalise l'organisation globale de la solution, les mécanismes de traitement des données techniques et les interactions entre les composantes applicatives, afin d'assurer une supervision fiable, continue et exploitable des infrastructures \textbf{RAN Nokia} et, à terme, \textbf{Huawei}.
+
+Dans un environnement télécom marqué par des volumes croissants de données, des mises à jour quotidiennes des équipements radio et des exigences permanentes d'analyse opérationnelle, l'architecture retenue doit répondre à un ensemble d'impératifs : centralisation des informations, automatisation des traitements, performance des requêtes, fiabilité des résultats, sécurisation des accès et capacité d'évolution vers des fonctionnalités avancées, notamment l'intelligence artificielle contrôlée et l'analyse prédictive.
+
+Le projet s'appuie principalement sur l'exploitation des snapshots au format \textbf{XML}, produits quotidiennement par les équipements Nokia et déposés dans un répertoire central (\texttt{DATA.XML}). Chaque jour, un dossier daté correspondant au snapshot \textbf{J-1} est disponible sur le serveur interne, ce qui permet un suivi régulier et comparatif de l'état du réseau d'accès radio.
+
+Ces fichiers recèlent des informations stratégiques relatives :
+
+\begin{itemize}
+    \item aux états opérationnels des sites radio (actifs, bloqués, hors service) ;
+    \item aux adresses IP, versions logicielles et paramètres d'identification des sites ;
+    \item aux technologies déployées et à la répartition des cellules (2G, 3G, 4G, 5G) ;
+    \item aux inventaires matériels installés (CABINET, SMOD, RMOD, BBMOD, etc.) ;
+    \item aux changements d'infrastructure, remplacements et évolutions inter-snapshots ;
+    \item aux indicateurs de qualité, de complétude et de cohérence nécessaires à la supervision NOC.
+\end{itemize}
+
+Dans ce contexte, l'architecture technique doit garantir automatiquement :
+
+\begin{itemize}
+    \item la détection des nouveaux dossiers de snapshots disponibles sur la source XML ;
+    \item l'importation, le parsing et l'extraction structurée des données réseau ;
+    \item le nettoyage, la normalisation et la structuration des informations en tables analytiques ;
+    \item le stockage optimisé dans un \textit{data lake} Parquet, interrogeable via DuckDB ;
+    \item la génération des indicateurs, statistiques, analyses Delta et rapports de changement ;
+    \item l'alimentation de l'interface décisionnelle et, en extension, du tableau de bord Power BI ;
+    \item la consultation rapide, filtrée et sécurisée des résultats par les équipes techniques.
+\end{itemize}
+
+L'architecture retenue repose sur une approche hybride, combinant plusieurs modèles complémentaires adaptés aux exigences du projet.
+
+\vspace{0.3cm}
+
+La solution s'appuie principalement sur :
+
+\begin{itemize}
+    \item une architecture \textbf{client/serveur}, dans laquelle le frontend \textbf{Next.js} consomme une API \textbf{FastAPI} centralisant les traitements et les règles métier ;
+    \item une architecture \textbf{N-tiers}, assurant une séparation nette entre présentation, API, services analytiques, couche de données et persistance (authentification, audit, Guardian) ;
+    \item une architecture orientée \textbf{pipeline de données}, automatisant le flux XML $\rightarrow$ Parquet $\rightarrow$ agrégats \textit{serving}, selon une logique \textit{Bronze / Silver / Gold}.
+\end{itemize}
+
+Cette combinaison permet de déployer une plateforme centralisée, capable de traiter quotidiennement les snapshots réseau tout en garantissant une organisation claire des responsabilités et une exploitation efficace des données techniques.
+
+\vspace{0.3cm}
+
+Le fonctionnement global de la solution peut être résumé selon les étapes suivantes :
+
+\begin{itemize}
+    \item les fichiers XML du snapshot \textbf{J-1} sont déposés dans le répertoire source (\texttt{DATA.XML}) ;
+    \item le pipeline détecte les nouveaux dossiers et lance le traitement automatique ;
+    \item les fichiers XML sont parsés, validés et transformés en tables Parquet partitionnées ;
+    \item les données consolidées alimentent les services analytiques (sites, inventaire, Delta, qualité) ;
+    \item les moteurs \textbf{Guardian Copilot} exécutent les contrôles d'intégrité, de changement, d'anomalie et de risque ;
+    \item l'API expose les résultats au frontend et, le cas échéant, aux exports CSV destinés à Power BI ;
+    \item l'interface affiche les KPI, tableaux, graphiques et modules IA dans un parcours NOC unifié.
+\end{itemize}
+
+Cette architecture présente plusieurs avantages majeurs pour \textbf{RAN Intelligence} :
+
+\begin{itemize}
+    \item une centralisation maîtrisée des données réseau multi-snapshots ;
+    \item une automatisation bout en bout du cycle d'ingestion et de consolidation ;
+    \item une amélioration notable des performances d'analyse grâce à DuckDB et au partitionnement Parquet ;
+    \item une meilleure fiabilité des informations via la chaîne \textbf{Data Trust} (hash, audit, validation) ;
+    \item une séparation claire des responsabilités entre les couches applicatives ;
+    \item une maintenance facilitée et une évolutivité compatible Docker, cache Redis et CI/CD ;
+    \item une base solide pour l'assistant IA contrôlé (\textbf{RAN Guardian Copilot}), fondé sur des outils backend et non sur un accès direct au \textit{data lake}.
+\end{itemize}
+
+Par ailleurs, l'architecture a été conçue de manière modulaire afin d'accueillir des extensions stratégiques, notamment :
+
+\begin{itemize}
+    \item la généralisation au flux \textbf{RAN Huawei}, déjà préparée au niveau modèle de données ;
+    \item le renforcement des modules prédictifs (\textbf{Predictive Risk Engine}, tendances, cartes à risque) ;
+    \item le dimensionnement des pièces de rechange (\textit{Spares}) et le suivi des remplacements ;
+    \item l'interconnexion avec Power BI, les systèmes OSS/ITSM et une migration big-data (MinIO, Spark).
+\end{itemize}
+
+Ainsi, l'architecture technique retenue constitue un socle robuste, évolutif et performant, capable d'assurer une supervision intelligente, centralisée et sécurisée des infrastructures RAN au sein d'un environnement télécom exigeant.
+
+\end{flushleft}
+
+\vspace{0.5cm}
+
+\subsection{Types d'architectures}\label{sec:ch2-types}
+La solution combine :
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \textbf{Client/Serveur} : frontend Next.js consommant l'API FastAPI ;
+    \item \textbf{N-Tiers} : présentation, API, services métier, lake analytique, persistance auth ;
+    \item \textbf{Pipeline de données} : Bronze (XML) $\rightarrow$ Silver (Parquet) $\rightarrow$ Gold (agrégats serving).
+\end{itemize}
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=1.3cm,every node/.style={font=\small},box/.style={draw,rounded corners,minimum width=5.4cm,minimum height=0.85cm,align=center,thick,fill=red!4}]
+\node[box] (xml) {Snapshots XML Nokia / Huawei};
+\node[box,below=of xml] (pipe) {Pipeline ETL (Python, lxml, Pandas)};
+\node[box,below=of pipe] (lake) {Data Lake Parquet + DuckDB};
+\node[box,below=of lake] (api) {API FastAPI 2.0};
+\node[box,below=of api] (ui) {Frontend Next.js 16};
+\foreach \a/\b in {xml/pipe,pipe/lake,lake/api,api/ui}{\draw[-{Stealth},thick,red!70] (\a) -- (\b);}
+\end{tikzpicture}
+\caption{\textbf{Architecture globale de RAN Intelligence}}
+\label{fig:global_architecture_ran}
+\end{figure}
+
+\subsection{Langage de modélisation utilisé}\label{sec:ch2-uml}
+La conception s'appuie sur \textbf{UML} : diagrammes de cas d'utilisation (périmètre fonctionnel), de séquence (flux auth, ingestion, assistant IA), de classes (services et entités métier). Cette modélisation facilite la communication entre parties prenantes et la traçabilité des sprints.
+
+\subsection{Technologies utilisées}\label{sec:ch2-tech}
+
+\begin{table}[H]\centering\caption{\textbf{Stack technique de RAN Intelligence}}\label{tab:stack}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{|p{3.5cm}|p{4.2cm}|p{6.5cm}|}
+\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{Couche}&\color{white}\textbf{Technologie}&\color{white}\textbf{Rôle}\\\hline
+Frontend & Next.js 16, React 19, Tailwind 4 & Interface premium, SSR/CSR \\\hline
+Backend & FastAPI 0.122, Uvicorn & API REST, auth, analytics \\\hline
+Données & DuckDB, Parquet, Pandas & Serving analytique haute performance \\\hline
+Parsing & lxml, Python 3.12 & Extraction XML multi-vendor \\\hline
+Auth & JWT, bcrypt, PostgreSQL/SQLite & Sécurité entreprise \\\hline
+IA & OpenAI GPT-4o, RAG keyword & Assistant contrôlé \\\hline
+Infra & Docker, Redis, GitHub Actions & Déploiement, cache, CI/CD \\\hline
+\end{tabular}
+\end{table}
+
+\section{Gestion du projet}\label{sec:ch2-gestion}
+
+\subsection{Gestion du projet avec la méthode Scrum}
+Le pilotage repose sur un \textbf{Product Backlog} priorisé, des \textbf{Sprint Backlogs} et des revues bimensuelles avec l'encadrant métier. Les user stories respectent le format : \textit{En tant que [acteur], je veux [action], afin de [valeur]}.
+
+\subsubsection{Membres Scrum et rôles}
+\begin{table}[H]\centering\caption{\textbf{Rôles Scrum du projet}}\label{tab:scrum-roles}
+\begin{tabular}{|p{4cm}|p{9.5cm}|}
+\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{Rôle}&\color{white}\textbf{Attribution / Mission}\\\hline
+Product Owner & Encadrant métier (priorisation backlog) \\\hline
+Scrum Master & Stagiaire (animation cérémonies) \\\hline
+Équipe de dev & Stagiaire (full-stack + data) \\\hline
+Encadrant académique & Revue méthodologique \\\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Diagramme de cas d'utilisation global}
+\FigurePlaceholder{Diagramme de cas d'utilisation global — authentification, ingestion, consultation, Guardian, assistant IA}
+
+\section{Organisation fonctionnelle du produit}\label{sec:ch2-backlog}
+
+\subsection{Backlog Produit}
+\begin{longtable}{|p{1.1cm}|p{7.4cm}|p{1.5cm}|p{2.6cm}|}
+\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{ID}&\color{white}\textbf{User Story}&\color{white}\textbf{Priorité}&\color{white}\textbf{Sprint}\\\hline
+US-01 & Authentification JWT et MFA entreprise & Haute & Sprint 1 \\\hline
+US-02 & Bootstrap administrateur sécurisé & Haute & Sprint 1 \\\hline
+US-03 & Pipeline XML $\rightarrow$ Parquet & Haute & Sprint 2 \\\hline
+US-04 & Upload admin et registre bronze & Haute & Sprint 2 \\\hline
+US-05 & Dashboard exécutif et filtres globaux & Haute & Sprint 3 \\\hline
+US-06 & Sites, inventaire, assets, qualité & Haute & Sprint 3 \\\hline
+US-07 & Module Delta et remplacements & Moyenne & Sprint 3 \\\hline
+US-08 & Moteurs Guardian (4 engines) & Haute & Sprint 4 \\\hline
+US-09 & Anomalies, cartes risque, patterns & Moyenne & Sprint 4 \\\hline
+US-10 & Assistant IA contrôlé + RAG & Haute & Sprint 5 \\\hline
+US-11 & Docker, CI/CD, observabilité & Moyenne & Sprint 5 \\\hline
+\caption{\textbf{Product Backlog priorisé}}
+\label{tab:product-backlog}
+\end{longtable}
+
+\section{Diagramme de classe général}\label{sec:ch2-classes}
+
+\subsection{Diagramme des classes général}
+Les classes principales incluent : \texttt{AuthService}, \texttt{DataService}, \texttt{GuardianOrchestrator}, \texttt{RanAiTools}, \texttt{TrustService}, \texttt{NotificationService}, ainsi que les entités \texttt{User}, \texttt{Snapshot}, \texttt{Site}, \texttt{Equipment}.
+
+\FigurePlaceholder{Diagramme de classes général — services API et entités métier RAN}
+
+\section*{Conclusion}\label{sec:ch2-conclusion}
+\addcontentsline{toc}{section}{Conclusion}
+L'analyse des besoins et l'architecture retenue constituent le socle contractuel du projet. Les chapitres suivants décrivent la réalisation incrémentale par sprints, de l'authentification à l'industrialisation de \textbf{RAN Intelligence}.
+
+\clearpage
+
+% ============================================================
+% CHAPITRE 3 — Sprint 1 : Authentification
+% ============================================================
+\ChapterTitlePage{Sprint 1 — Authentification et Gestion des Comptes}{Sprint 1 — Authentification\\ et Gestion des Comptes}
+
+\ChapterTOC{%
+\begin{tabular}{@{}p{0.08\textwidth}p{0.78\textwidth}r@{}}
+& \textbf{Introduction}\dotfill & \textbf{\pageref{sec:ch3-intro}} \\
+1 & \textbf{Organisation du sprint}\dotfill & \textbf{\pageref{sec:ch3-org}} \\
+2 & \textbf{Conception}\dotfill & \textbf{\pageref{sec:ch3-conception}} \\
+3 & \textbf{Réalisation}\dotfill & \textbf{\pageref{sec:ch3-realisation}} \\
+& \textbf{Conclusion}\dotfill & \textbf{\pageref{sec:ch3-conclusion}} \\
+\end{tabular}}
+
+\clearpage
+\fancyhead[L]{\small\textbf{Sprint 1 — Authentification}}
+
+\section*{Introduction}\label{sec:ch3-intro}
+\addcontentsline{toc}{section}{Introduction}
+Le premier sprint vise à sécuriser l'accès à la plateforme avant toute exposition de données sensibles du réseau. Il couvre l'authentification JWT, le MFA entreprise, le bootstrap administrateur et la gestion des rôles.
+
+\section{Organisation du sprint}\label{sec:ch3-org}
+
+\subsection{Objectif du Sprint 1}
+Mettre en place un socle d'\textbf{authentification premium} conforme aux exigences d'un outil interne opérateur : traçabilité, double canal OTP, séparation admin/user.
+
+\subsection{Backlog du Sprint 1}
+\SprintBacklogTable{%
+SP1-01 & En tant qu'administrateur, je veux initialiser la plateforme via bootstrap & Haute & Terminé & 8 \\ \hline
+SP1-02 & En tant qu'utilisateur, je veux me connecter avec MFA email/SMS & Haute & Terminé & 13 \\ \hline
+SP1-03 & En tant qu'admin, je veux gérer les comptes et les clés d'accès & Moyenne & Terminé & 5 \\ \hline
+SP1-04 & En tant qu'utilisateur, je veux réinitialiser mon mot de passe & Moyenne & Terminé & 5 \\ \hline
+}{Backlog du Sprint 1 — Authentification}
+
+\section{Conception}\label{sec:ch3-conception}
+
+\subsection{Diagramme de cas d'utilisation « S'authentifier »}
+\FigurePlaceholder{Cas d'utilisation — login, MFA, bootstrap admin, logout}
+
+\subsection{Diagramme de séquence « Authentification MFA »}
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=0.5cm,every node/.style={font=\scriptsize}]
+\node[draw,minimum width=1.6cm] (u) {Utilisateur};
+\node[draw,minimum width=1.6cm,right=1.2cm of u] (f) {Frontend};
+\node[draw,minimum width=1.6cm,right=1.2cm of f] (a) {API Auth};
+\node[draw,minimum width=1.6cm,right=1.2cm of a] (n) {Notifications};
+\draw[-{Stealth}] (u.south) ++(0,-0.3) -- ++(0,-2) node[midway,left]{credentials} (f.south) ++(0,-0.3);
+\end{tikzpicture}
+\caption{\textbf{Flux simplifié d'authentification MFA}}
+\label{fig:seq-auth}
+\end{figure}
+
+\section{Réalisation}\label{sec:ch3-realisation}
+
+\subsection{Backend — \texttt{auth\_service.py}}
+Le service centralise : hachage bcrypt, émission JWT (access/refresh), OTP hashés, rate limiting, audit des connexions. Les refresh tokens opaques sont validés par empreinte en base.
+
+\subsection{Frontend — pages \texttt{/login}, \texttt{/admin/setup}}
+Interface premium Ooredoo : onglets admin/user, saisie OTP unifiée, reprise du bootstrap si admin en attente de vérification. Persistance session via \texttt{localStorage} et cookie \texttt{ran\_auth}.
+
+\subsection{Bilan du sprint}
+Le sprint a livré un parcours d'accès robuste, prérequis indispensable à la mise en production interne. Les tests manuels ont validé bootstrap, MFA dev/prod et refresh de session.
+
+\section*{Conclusion}\label{sec:ch3-conclusion}
+\addcontentsline{toc}{section}{Conclusion}
+Le Sprint 1 a posé les fondations de gouvernance de \textbf{RAN Intelligence}. Le Sprint 2 adresse l'ingestion des données XML.
+
+\clearpage
+
+% ============================================================
+% CHAPITRE 4 — Sprint 2 : Ingestion
+% ============================================================
+\ChapterTitlePage{Sprint 2 — Ingestion et Pipeline de Données}{Sprint 2 — Ingestion\\ et Pipeline de Données}
+
+\clearpage
+\fancyhead[L]{\small\textbf{Sprint 2 — Ingestion}}
+
+\section*{Introduction}\label{sec:ch4-intro}
+\addcontentsline{toc}{section}{Introduction}
+Ce sprint transforme les snapshots XML en un \textbf{data lake analytique} exploitable par DuckDB. Il constitue le cœur data du projet.
+
+\section{Organisation du sprint}\label{sec:ch4-org}
+\SprintBacklogTable{%
+SP2-01 & Parser Nokia parallèle (ProcessPool) & Haute & Terminé & 13 \\ \hline
+SP2-02 & Export Parquet atomique (sites, equipment, counters) & Haute & Terminé & 8 \\ \hline
+SP2-03 & Calcul delta et site\_changes & Haute & Terminé & 8 \\ \hline
+SP2-04 & Upload admin \texttt{POST /ingest/xml} & Moyenne & Terminé & 5 \\ \hline
+SP2-05 & Data Trust — hash SHA-256 & Moyenne & Terminé & 5 \\ \hline
+}{Backlog du Sprint 2 — Ingestion}
+
+\section{Conception}\label{sec:ch4-conception}
+Le pipeline suit le modèle \textbf{Medallion} : couche Bronze (XML + registre), Silver (Parquet normalisé), Gold (agrégats et métriques pré-calculées). Le schéma below résume le flux.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=1.2cm,every node/.style={font=\small},box/.style={draw,rounded corners,minimum width=4.8cm,minimum height=0.8cm,align=center,fill=red!4}]
+\node[box] (b) {Bronze : XML + snapshot\_registry.csv};
+\node[box,below=of b] (s) {Silver : Parquet (sites, equipment, counters, completeness)};
+\node[box,below=of s] (g) {Gold : delta, agrégats serving};
+\draw[-{Stealth},thick,red!70] (b)--(s); \draw[-{Stealth},thick,red!70] (s)--(g);
+\end{tikzpicture}
+\caption{\textbf{Architecture Medallion du pipeline RAN Intelligence}}
+\label{fig:medallion}
+\end{figure}
+
+\section{Réalisation}\label{sec:ch4-realisation}
+
+\subsection{Parsing XML Nokia}
+Le module \texttt{nokia\_parser.py} (lxml) extrait sites, équipements (RMOD, BBMOD, SMOD…), compteurs et scores de complétude. Le traitement parallèle réduit significativement le temps d'ingestion.
+
+\subsection{Stockage Parquet et serving DuckDB}
+Les datasets sont partitionnés par \texttt{snapshot\_date}. \texttt{data\_service.py} exécute des requêtes SQL directement sur \texttt{read\_parquet(...)} via DuckDB, garantissant des temps de réponse adaptés aux tableaux paginés du frontend.
+
+\subsection{Intégrité Data Trust}
+Chaque fichier XML est hashé ; les ancres de confiance permettent de détecter toute altération post-ingestion.
+
+\section*{Conclusion}\label{sec:ch4-conclusion}
+\addcontentsline{toc}{section}{Conclusion}
+Le Sprint 2 a rendu les données RAN exploitables à grande échelle. Le Sprint 3 expose ces données via des dashboards premium.
+
+\clearpage
+
+% ============================================================
+% CHAPITRE 5 — Sprint 3 : Dashboards
+% ============================================================
+\ChapterTitlePage{Sprint 3 — Dashboards et Modules Analytiques}{Sprint 3 — Dashboards\\ et Modules Analytiques}
+
+\clearpage
+\fancyhead[L]{\small\textbf{Sprint 3 — Dashboards}}
+
+\section*{Introduction}\label{sec:ch5-intro}
+\addcontentsline{toc}{section}{Introduction}
+Ce sprint livre l'interface NOC : pilotage opérationnel, exploration sites/inventaire/assets, qualité et comparaisons delta.
+
+\section{Organisation du sprint}\label{sec:ch5-org}
+\SprintBacklogTable{%
+SP3-01 & Dashboard exécutif (KPI, graphiques) & Haute & Terminé & 8 \\ \hline
+SP3-02 & Page Sites avec investigation & Haute & Terminé & 8 \\ \hline
+SP3-03 & Inventaire paginé v2 & Haute & Terminé & 5 \\ \hline
+SP3-04 & Assets — distribution et filtres serial & Haute & Terminé & 8 \\ \hline
+SP3-05 & Module Delta unifié & Moyenne & Terminé & 8 \\ \hline
+SP3-06 & Filtres globaux, i18n FR/EN & Moyenne & Terminé & 5 \\ \hline
+}{Backlog du Sprint 3 — Dashboards}
+
+\section{Réalisation}\label{sec:ch5-realisation}
+
+\subsection{Page d'accueil}
+Tableau de bord exécutif : nombre de sites, équipements, disponibilité, graphiques Recharts, filtres par snapshot et vendor (Nokia/Huawei).
+
+\subsection{Page Sites}
+Exploration paginée, recherche, panneau d'investigation (historique site, équipements, KPI séries temporelles), lien direct vers l'assistant IA pour RCA.
+
+\subsection{Page Inventaire et Assets}
+Inventaire multi-types avec pagination serveur. La page \textbf{Assets} propose distribution par type/code produit, signaux d'interprétation (Pivot, Risque, Mineur…) et filtre de dédoublonnage des numéros de série.
+
+\subsection{Module Delta}
+Comparaison inter-snapshots : sites ajoutés/supprimés, remplacements matériels, visualisation unifiée des écarts.
+
+\FigurePlaceholder{Captures d'écran — Dashboard, Sites, Assets (à insérer depuis la plateforme)}
+
+\section*{Conclusion}\label{sec:ch5-conclusion}
+\addcontentsline{toc}{section}{Conclusion}
+Le Sprint 3 a rendu la plateforme opérationnelle pour les analystes NOC. Les sprints 4 et 5 enrichissent la couche intelligence et l'industrialisation.
+
+\clearpage
+
+% ============================================================
+% CHAPITRE 6 — Sprint 4 & 5 : Guardian, IA, Industrialisation
+% ============================================================
+\ChapterTitlePage{Sprint 4 \& 5 — Guardian Copilot et Industrialisation}{Sprint 4 \& 5 — Guardian Copilot\\ et Industrialisation}
+
+\clearpage
+\fancyhead[L]{\small\textbf{Guardian Copilot et Industrialisation}}
+
+\section*{Introduction}\label{sec:ch6-intro}
+\addcontentsline{toc}{section}{Introduction}
+Les deux derniers sprints apportent la dimension proactive (Guardian) et conversationnelle (assistant IA), puis préparent le déploiement conteneurisé.
+
+\section{Sprint 4 — Guardian et intelligence métier}\label{sec:ch6-s4}
+
+\subsection{Les quatre moteurs Guardian}
+Après chaque ingestion, l'orchestrateur exécute :
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+    \item \textbf{Data Integrity Engine} — audit snapshot, validation gate ;
+    \item \textbf{Change Intelligence Engine} — événements de changement ;
+    \item \textbf{Anomaly Intelligence Engine} — persistance des anomalies ;
+    \item \textbf{Predictive Risk Engine} — scoring risque par site/type.
+\end{enumerate}
+
+\subsection{Pages associées}
+\texttt{/guardian}, \texttt{/anomalies}, \texttt{/cartes-risque}, \texttt{/patterns}, \texttt{/ops} (métriques API, cache Redis, feature flags).
+
+\section{Sprint 5 — Assistant IA et industrialisation}\label{sec:ch6-s5}
+
+\subsection{Assistant IA contrôlé}
+L'assistant (\texttt{/ai-assistant}) s'appuie sur \textbf{OpenAI GPT-4o} avec \textit{function calling} : 13 outils métier (\texttt{ran\_ai\_tools.py}) sans accès direct au data lake. Un moteur RAG keyword complète les procédures Nokia/Huawei. Fallback local si clé API indisponible.
+
+\subsection{Objectifs d'intégration}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item RCA guidée par site (\texttt{/investigate/site/ai-rca}) ;
+    \item historique conversations synchronisé ;
+    \item voix et pièces jointes (XML, CSV, images) ;
+    \item human-in-the-loop : l'IA explique, l'humain décide.
+\end{itemize}
+
+\subsection{Industrialisation}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \textbf{Docker Compose} : API + frontend + PostgreSQL auth ;
+    \item \textbf{Redis} : cache requêtes analytiques ;
+    \item \textbf{GitHub Actions} : CI lint/build ;
+    \item \textbf{OpenTelemetry / Sentry} : observabilité production.
+\end{itemize}
+
+\section{Bilan global des sprints}\label{sec:ch6-bilan}
+\begin{table}[H]\centering\caption{\textbf{Synthèse des livrables par sprint}}\label{tab:sprint-synthese}
+\begin{tabular}{|p{2cm}|p{5.5cm}|p{6.8cm}|}
+\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{Sprint}&\color{white}\textbf{Thème}&\color{white}\textbf{Livrables clés}\\\hline
+1 & Auth & JWT, MFA, bootstrap, rôles \\\hline
+2 & Data & Pipeline XML, Parquet, Trust \\\hline
+3 & UI & Dashboards, sites, assets, delta \\\hline
+4 & Guardian & 4 moteurs, anomalies, ops \\\hline
+5 & IA \& Ops & Assistant, Docker, CI/CD \\\hline
+\end{tabular}
+\end{table}
+
+\section*{Conclusion}\label{sec:ch6-conclusion}
+\addcontentsline{toc}{section}{Conclusion}
+Les sprints 4 et 5 transforment \textbf{RAN Intelligence} en copilote NOC complet, alliant règles métier, prédiction et dialogue contrôlé, prêt pour un déploiement industrialisé.
+
+\clearpage
+
+% ============================================================
+% CONCLUSION GENERALE
+% ============================================================
+\phantomsection\addcontentsline{toc}{chapter}{Conclusion générale}
+\vspace*{1.2cm}
+\noindent\hspace*{1.25cm}\begin{minipage}[c]{0.06\textwidth}\color{black}\rule{0.42cm}{1.25cm}\end{minipage}\hspace{-0.15cm}%
+\begin{minipage}[c]{0.75\textwidth}{\LARGE\bfseries Conclusion générale}\\[-0.15cm]\rule{0.78\textwidth}{0.5pt}\end{minipage}
+\vspace{1.35cm}
+
+Ce projet de fin d'études a permis de concevoir et de réaliser \textbf{RAN Intelligence}, une plateforme décisionnelle premium répondant aux enjeux concrets de supervision des infrastructures RAN au sein d'Ooredoo Tunisie. Partant d'un contexte marqué par des volumes XML croissants et des processus d'analyse fragmentés, la solution proposée offre désormais un socle unifié, sécurisé et évolutif.
+
+Sur le plan technique, les apports majeurs concernent :
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item l'automatisation du pipeline \textbf{XML $\rightarrow$ Parquet $\rightarrow$ DuckDB} ;
+    \item une architecture \textbf{FastAPI / Next.js} moderne et maintenable ;
+    \item un module \textbf{Guardian Copilot} articulant intégrité, changements, anomalies et risques ;
+    \item un assistant IA \textbf{contrôlé} respectant la séparation stricte entre LLM et data lake ;
+    \item une authentification entreprise conforme aux usages opérateur (JWT, MFA, bootstrap).
+\end{itemize}
+
+Sur le plan opérationnel, la plateforme améliore la visibilité sur l'état du réseau, accélère l'identification des changements matériels, fiabilise les analyses de qualité et ouvre la voie à une maintenance plus proactive.
+
+Les perspectives d'évolution incluent : généralisation \textbf{Huawei}, migration big-data (Spark/MinIO), RAG vectoriel (pgvector), dimensionnement spares avancé et intégration ITSM. Ce projet confirme l'intérêt stratégique des plateformes data + IA au service de l'excellence opérationnelle télécom.
+
+\begin{flushright}\textit{Ben Ahmed Hanine — ESPRIT School of Business — 2025/2026}\end{flushright}
+
+\clearpage
+
+% ============================================================
+% BIBLIOGRAPHIE
+% ============================================================
+\phantomsection\addcontentsline{toc}{chapter}{Bibliographie}
+\vspace*{1.2cm}
+{\LARGE\bfseries Bibliographie}\vspace{1cm}
+
+\begin{thebibliography}{99}
+\bibitem{3gpp} 3GPP, \textit{Technical Specification Group Radio Access Network}, https://www.3gpp.org/
+\bibitem{nokia} Nokia, \textit{RAN Network Documentation}, documentation officielle équipements radio.
+\bibitem{fastapi} FastAPI, \textit{Modern Python Web Framework}, https://fastapi.tiangolo.com/
+\bibitem{nextjs} Vercel, \textit{Next.js Documentation}, https://nextjs.org/docs
+\bibitem{duckdb} DuckDB, \textit{Analytical Database}, https://duckdb.org/
+\bibitem{scrum} Schwaber K., Sutherland J., \textit{The Scrum Guide}, https://scrumguides.org/
+\bibitem{kimball} Kimball R., \textit{The Data Warehouse Toolkit}, Wiley, 2013.
+\bibitem{mlops} O'Reilly, \textit{Building Machine Learning Powered Applications}, 2020.
+\bibitem{ooredoo} Ooredoo Group, \textit{Annual Report}, rapports publics groupe.
+\bibitem{owasp} OWASP, \textit{Authentication Cheat Sheet}, https://cheatsheetseries.owasp.org/
+\end{thebibliography}
+
+\end{document}

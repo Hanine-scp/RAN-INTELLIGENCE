@@ -6,6 +6,7 @@ import { useAppContext } from "@/components/app-provider";
 import { NavIcon } from "@/components/nav-icon";
 import { navSections } from "@/lib/nav";
 import { t } from "@/lib/i18n";
+import { BRAND } from "@/lib/chart-theme";
 
 export function NavRail() {
   const pathname = usePathname();
@@ -33,7 +34,7 @@ export function NavRail() {
           type="button"
           onClick={() => setNavCollapsed((prev) => !prev)}
           aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-slate-500 transition hover:bg-slate-50 hover:text-red-600"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-slate-500 transition hover:bg-slate-50"
         >
           {navCollapsed ? ">>" : "<<"}
         </button>
@@ -50,8 +51,9 @@ export function NavRail() {
               <div className="mx-auto mb-2 h-px w-6 bg-slate-200" />
             )}
             <ul className="space-y-1">
-              {section.items.map((item) => {
+              {section.items.map((item, itemIndex) => {
                 const active = isActive(item.href);
+                const accent = [BRAND.teal, BRAND.royalBlue, BRAND.orange, BRAND.sage][itemIndex % 4];
                 return (
                   <li key={item.href}>
                     <Link
@@ -59,16 +61,17 @@ export function NavRail() {
                       title={t(language, item.key)}
                       className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                         navCollapsed ? "justify-center" : ""
-                      } ${
-                        active
-                          ? "bg-red-50 text-red-700"
-                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
+                      } ${active ? "" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+                      style={active ? { backgroundColor: `${accent}14`, color: accent } : undefined}
                     >
                       {active ? (
-                        <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-red-600" />
+                        <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full" style={{ backgroundColor: accent }} />
                       ) : null}
-                      <NavIcon name={item.icon} className={`h-[18px] w-[18px] shrink-0 ${active ? "text-red-600" : "text-slate-400 group-hover:text-slate-600"}`} />
+                      <NavIcon
+                        name={item.icon}
+                        className={`h-[18px] w-[18px] shrink-0 ${active ? "" : "text-slate-400 group-hover:text-slate-600"}`}
+                        style={active ? { color: accent } : undefined}
+                      />
                       {!navCollapsed ? <span className="truncate">{t(language, item.key)}</span> : null}
                     </Link>
                   </li>

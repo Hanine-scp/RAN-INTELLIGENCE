@@ -13,7 +13,7 @@ type BrandLogoProps = {
   priority?: boolean;
 };
 
-const HEIGHT = { sm: 32, md: 48, lg: 60, xl: 72, hero: 96, auth: 118, "2xl": 128, "3xl": 168 } as const;
+const HEIGHT = { sm: 32, md: 48, lg: 60, xl: 72, hero: 96, auth: 152, "2xl": 128, "3xl": 168 } as const;
 
 export function BrandLogo({ size = "md", className = "", priority = false }: BrandLogoProps) {
   const [failed, setFailed] = useState(false);

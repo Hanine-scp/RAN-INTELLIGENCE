@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sqlite3
@@ -32,7 +33,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at TEXT,
     department TEXT NOT NULL DEFAULT '',
     employee_id TEXT NOT NULL DEFAULT '',
-    created_by_admin_id INTEGER
+    created_by_admin_id INTEGER,
+    recovery_email TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS access_keys (
@@ -77,6 +79,19 @@ CREATE TABLE IF NOT EXISTS auth_audit (
     detail TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS secure_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL,
+    token_type TEXT NOT NULL CHECK(token_type IN ('email_verify', 'password_reset')),
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_secure_tokens_hash ON secure_tokens(token_hash, token_type);
 """
 
 POSTGRES_SCHEMA = """
@@ -96,7 +111,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at TEXT,
     department TEXT NOT NULL DEFAULT '',
     employee_id TEXT NOT NULL DEFAULT '',
-    created_by_admin_id INTEGER
+    created_by_admin_id INTEGER,
+    recovery_email TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS access_keys (
@@ -139,6 +155,18 @@ CREATE TABLE IF NOT EXISTS auth_audit (
     detail TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS secure_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    token_hash TEXT NOT NULL,
+    token_type TEXT NOT NULL CHECK(token_type IN ('email_verify', 'password_reset')),
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_secure_tokens_hash ON secure_tokens(token_hash, token_type);
 """
 
 
@@ -272,9 +300,61 @@ def check_database_connection() -> dict[str, Any]:
 def init_auth_schema(conn: AuthDbConnection) -> None:
     conn.executescript(POSTGRES_SCHEMA if conn.is_postgres else SQLITE_SCHEMA)
     _ensure_user_columns(conn)
+    _ensure_secure_tokens_table(conn)
+
+
+def _ensure_secure_tokens_table(conn: AuthDbConnection) -> None:
+    if conn.is_postgres:
+        exists = conn.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'secure_tokens'
+            """
+        ).fetchone()
+    else:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'secure_tokens'"
+        ).fetchone()
+    if exists is None:
+        if conn.is_postgres:
+            conn.execute(
+                """
+                CREATE TABLE secure_tokens (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    token_hash TEXT NOT NULL,
+                    token_type TEXT NOT NULL CHECK(token_type IN ('email_verify', 'password_reset')),
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_secure_tokens_hash ON secure_tokens(token_hash, token_type)"
+            )
+        else:
+            conn.execute(
+                """
+                CREATE TABLE secure_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    token_hash TEXT NOT NULL,
+                    token_type TEXT NOT NULL CHECK(token_type IN ('email_verify', 'password_reset')),
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_secure_tokens_hash ON secure_tokens(token_hash, token_type)"
+            )
 
 
 def _ensure_user_columns(conn: AuthDbConnection) -> None:
+    logger = logging.getLogger(__name__)
     if conn.is_postgres:
         rows = conn.execute(
             """
@@ -291,10 +371,24 @@ def _ensure_user_columns(conn: AuthDbConnection) -> None:
         "department": "ALTER TABLE users ADD COLUMN department TEXT NOT NULL DEFAULT ''",
         "employee_id": "ALTER TABLE users ADD COLUMN employee_id TEXT NOT NULL DEFAULT ''",
         "created_by_admin_id": "ALTER TABLE users ADD COLUMN created_by_admin_id INTEGER",
+        "recovery_email": "ALTER TABLE users ADD COLUMN recovery_email TEXT NOT NULL DEFAULT ''",
     }
     for column, statement in migrations.items():
-        if column not in existing:
+        if column in existing:
+            continue
+        try:
             conn.execute(statement)
+        except Exception as exc:
+            if conn.is_postgres and "InsufficientPrivilege" in type(exc).__name__:
+                raise RuntimeError(
+                    f"PostgreSQL: impossible d'ajouter la colonne users.{column} "
+                    f"(l'utilisateur n'est pas propriétaire de la table).\n"
+                    f"Exécutez en tant que postgres:\n  {statement}\n"
+                    f"Ou commentez AUTH_DATABASE_URL dans .env.auth pour utiliser SQLite en local.\n"
+                    f"Ou utilisez le conteneur Docker auth (port 5433):\n"
+                    f"  AUTH_DATABASE_URL=postgresql://ran_auth:ran_auth_dev@localhost:5433/ran_intelligence"
+                ) from exc
+            logger.warning("Migration users.%s skipped: %s", column, exc)
 
 
 @contextmanager

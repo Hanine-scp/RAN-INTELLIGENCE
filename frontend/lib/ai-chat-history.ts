@@ -1,3 +1,5 @@
+import type { WebSearchMeta } from "@/lib/api";
+
 export type StoredChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -10,7 +12,10 @@ export type StoredChatMessage = {
   thinkingSteps?: string[];
   attachments?: string[];
   userQuestion?: string;
+  webSearchUsed?: boolean;
   feedback?: "up" | "down";
+  webSearchMeta?: WebSearchMeta | null;
+  aiModel?: string;
 };
 
 export type ChatConversation = {

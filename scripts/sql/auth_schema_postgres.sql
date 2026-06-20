@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at TEXT,
     department TEXT NOT NULL DEFAULT '',
     employee_id TEXT NOT NULL DEFAULT '',
-    created_by_admin_id INTEGER
+    created_by_admin_id INTEGER,
+    recovery_email TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS access_keys (

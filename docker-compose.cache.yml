@@ -1,0 +1,28 @@
+# Phase 2 — Redis cache for API (use with main compose)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.cache.yml up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ran-intelligence-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ran_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    environment:
+      CACHE_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  ran_redis_data:

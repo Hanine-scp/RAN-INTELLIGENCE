@@ -4,15 +4,28 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV DATA_ROOT=/app/data/lake
+ENV DATA_XML_ROOT=/app/DATA.XML
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY api ./api
+COPY config ./config
+COPY pipeline ./pipeline
+COPY scripts ./scripts
 COPY src ./src
-COPY data ./data
-COPY DATA.XML ./DATA.XML
+COPY data/bronze ./data/bronze
+
+RUN mkdir -p data/lake data/processed data/auth data/trust
+
+ENV UVICORN_WORKERS=2
+ENV API_HOST=0.0.0.0
+ENV API_PORT=8000
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+
+CMD ["python", "scripts/run_api.py"]

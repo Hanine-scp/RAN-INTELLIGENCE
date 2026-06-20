@@ -5,7 +5,8 @@ import { DataTable } from "@/components/data-table";
 import { KpiCards } from "@/components/kpi-cards";
 import { PageShell } from "@/components/page-shell";
 import { useAppContext } from "@/components/app-provider";
-import { anchorLatestTrust, getOperationalSummary, getQueryMetrics, getTrustAnchors } from "@/lib/api";
+import { anchorLatestTrust, getCacheStats, getHttpMetrics, getOperationalSummary, getQueryMetrics, getTrustAnchors } from "@/lib/api";
+import { PageLoadingSkeleton } from "@/components/skeleton";
 import { t } from "@/lib/i18n";
 
 type AnchorResult = {
@@ -40,6 +41,8 @@ export default function OpsPage() {
 
   const [opsSummary, setOpsSummary] = useState<Record<string, unknown>>({});
   const [queryMetrics, setQueryMetrics] = useState<Record<string, unknown>>({});
+  const [httpMetrics, setHttpMetrics] = useState<Record<string, unknown>>({});
+  const [cacheStats, setCacheStats] = useState<Record<string, unknown>>({});
   const [anchors, setAnchors] = useState<Record<string, unknown>[]>([]);
   const [anchorResult, setAnchorResult] = useState<AnchorResult | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -49,14 +52,18 @@ export default function OpsPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [ops, metrics, anchorRows] = await Promise.all([
+      const [ops, metrics, anchorRows, http, cache] = await Promise.all([
         hasDates ? getOperationalSummary(payload) : Promise.resolve({}),
         getQueryMetrics(),
         getTrustAnchors(),
+        getHttpMetrics(),
+        getCacheStats(),
       ]);
       setOpsSummary(ops);
       setQueryMetrics(metrics);
       setAnchors(anchorRows);
+      setHttpMetrics(http);
+      setCacheStats(cache);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to refresh operations data.");
@@ -108,8 +115,19 @@ export default function OpsPage() {
         label: t(language, "kpi_anchors"),
         value: loading && anchors.length === 0 ? "…" : String(anchors.length),
       },
+      {
+        label: language === "Français" ? "HTTP p95 (ms)" : "HTTP p95 (ms)",
+        value: loading && !httpMetrics.p95_ms ? "…" : formatMs(httpMetrics.p95_ms ?? 0),
+      },
+      {
+        label: language === "Français" ? "Cache hit rate" : "Cache hit rate",
+        value:
+          loading && cacheStats.hit_rate == null
+            ? "…"
+            : `${Math.round(Number(cacheStats.hit_rate ?? 0) * 100)}%`,
+      },
     ],
-    [anchors.length, language, loading, opsSummary, queryMetrics],
+    [anchors.length, cacheStats.hit_rate, httpMetrics.p95_ms, language, loading, opsSummary, queryMetrics],
   );
 
   const anchorRows = useMemo(
@@ -133,7 +151,7 @@ export default function OpsPage() {
         <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">{t(language, "ops_no_dates")}</p>
       ) : null}
 
-      <KpiCards items={kpis} />
+      {loading && !opsSummary.snapshot_count && !queryMetrics.samples ? <PageLoadingSkeleton /> : <KpiCards items={kpis} />}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="premium-card rounded-2xl p-5 lg:col-span-2">

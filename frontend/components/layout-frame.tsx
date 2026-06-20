@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useAppContext } from "@/components/app-provider";
 import { useAuth } from "@/components/auth-provider";
 import { FilterPanel } from "@/components/filter-panel";
+import { FloatingCopilot } from "@/components/floating-copilot";
 import { PlatformPolyAccent } from "@/components/ooredoo-poly-bg";
 import { TopBar } from "@/components/top-bar";
 import { VendorBanner } from "@/components/vendor-banner";
@@ -33,13 +34,14 @@ export function LayoutFrame({ children }: { children: React.ReactNode }) {
       <div className="relative flex min-w-0 flex-1 flex-col">
         <TopBar />
         <main className="flex w-full flex-1 flex-col gap-5 px-4 py-5 lg:flex-row lg:px-6 lg:py-6">
-          {sidebarOpen && pathname !== "/ai-assistant" ? <FilterPanel /> : null}
+          {sidebarOpen && pathname !== "/ai-assistant" && pathname !== "/import" ? <FilterPanel /> : null}
           <section className="min-w-0 flex-1">
-            {pathname !== "/ai-assistant" ? <VendorBanner /> : null}
+            {pathname !== "/ai-assistant" && pathname !== "/import" ? <VendorBanner /> : null}
             {children}
           </section>
         </main>
       </div>
+      <FloatingCopilot />
     </div>
   );
 }

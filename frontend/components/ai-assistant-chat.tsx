@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { AiAttachMenu } from "@/components/ai-attach-menu";
 import { AiCameraModal } from "@/components/ai-camera-modal";
 import { AiMessageActions } from "@/components/ai-message-actions";
-import { copyToClipboard } from "@/lib/ai-export";
+import { downloadBlobFile } from "@/lib/ai-export";
 import { createSpeechSession, isSpeechRecognitionSupported } from "@/lib/speech-recognition";
 import { captureScreenshot } from "@/lib/ai-media-capture";
 import { listRecentFiles, loadRecentFile, saveRecentFile, type RecentFileRecord } from "@/lib/ai-recent-files";
@@ -14,8 +14,12 @@ import {
   getAssistantEngineStatus,
   type AssistantEngineStatus,
   type AssistantInsightResponse,
+  type WebSearchMeta,
 } from "@/lib/api";
+import { AiWebSourcesPanel } from "@/components/ai-web-sources-panel";
+import { AiResearchProgress } from "@/components/ai-research-progress";
 import { t, type Locale } from "@/lib/i18n";
+import { shouldAutoWebSearch, shouldUseEnrichedInsight } from "@/lib/copilot-routing";
 import type { StoredChatMessage } from "@/lib/ai-chat-history";
 import type { FilterPayload } from "@/lib/types";
 
@@ -31,6 +35,10 @@ type AttachmentItem = {
 };
 
 type ChatMessage = StoredChatMessage;
+
+type SubmitQuestionOptions = {
+  webSearchOverride?: boolean;
+};
 
 type AiAssistantChatProps = {
   language: Locale;
@@ -66,8 +74,22 @@ function renderRichText(text: string) {
 function MessageBody({ content }: { content: string }) {
   const blocks = content.split("\n\n");
   return (
-    <div className="space-y-2 text-[13px] leading-relaxed text-slate-700">
+    <div className="space-y-3 text-[13px] leading-relaxed text-slate-700">
       {blocks.map((block, i) => {
+        const trimmed = block.trim();
+        if (trimmed.startsWith("## ")) {
+          const [head, ...rest] = trimmed.split("\n");
+          return (
+            <div key={i}>
+              <h3 className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                {head.replace(/^##\s*/, "")}
+              </h3>
+              {rest.length ? (
+                <p className="whitespace-pre-wrap">{renderRichText(rest.join("\n"))}</p>
+              ) : null}
+            </div>
+          );
+        }
         const lines = block.split("\n");
         if (lines.every((l) => l.startsWith("- ") || l.startsWith("· "))) {
           return (
@@ -76,6 +98,13 @@ function MessageBody({ content }: { content: string }) {
                 <li key={j}>{renderRichText(line.replace(/^[-·]\s*/, ""))}</li>
               ))}
             </ul>
+          );
+        }
+        if (trimmed.startsWith("*") && trimmed.endsWith("*")) {
+          return (
+            <p key={i} className="text-[12px] italic text-slate-500">
+              {renderRichText(trimmed.replace(/^\*|\*$/g, ""))}
+            </p>
           );
         }
         if (block.startsWith("```")) {
@@ -228,6 +257,30 @@ export function AiAssistantChat({
   const [dataOpenIds, setDataOpenIds] = useState<Record<string, boolean>>({});
   const [engineStatus, setEngineStatus] = useState<AssistantEngineStatus | null>(null);
 
+  const engineSubtitle = useMemo(() => {
+    if (!engineStatus) return null;
+    const parts: string[] = [];
+    if (engineStatus.claude?.enabled) {
+      parts.push(`Claude · ${engineStatus.claude.model ?? "docs"}`);
+    } else if (engineStatus.engine === "openai") {
+      parts.push(`${t(language, "ai_engine_openai")} · ${engineStatus.model ?? "GPT"}`);
+    } else {
+      parts.push(t(language, "ai_engine_local"));
+    }
+    const web = engineStatus.web_search;
+    if (web?.active_api_provider) {
+      parts.push(`Web · ${web.active_api_provider.toUpperCase()}`);
+    } else if (web?.fallback_chain?.length) {
+      parts.push(`Web · ${web.fallback_chain.join(" + ")}`);
+    }
+    return parts.join(" · ");
+  }, [engineStatus, language]);
+
+  const promptSuggestions = useMemo(
+    () => [t(language, "ai_suggest_ran"), t(language, "ai_suggest_anomalies"), t(language, "ai_suggest_noc")],
+    [language],
+  );
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -263,8 +316,10 @@ export function AiAssistantChat({
     resetLocalChat();
   }, [conversationId, resetLocalChat]);
 
-  voiceLiveRef.current = voiceLive;
-  loadingRef.current = loading;
+  useEffect(() => {
+    voiceLiveRef.current = voiceLive;
+    loadingRef.current = loading;
+  }, [voiceLive, loading]);
 
   const hasConversation = messages.length > 0;
 
@@ -404,11 +459,13 @@ export function AiAssistantChat({
   );
 
   const submitQuestion = useCallback(
-    async (rawQuestion: string, fileItems?: AttachmentItem[]) => {
+    async (rawQuestion: string, fileItems?: AttachmentItem[], options?: SubmitQuestionOptions) => {
       const question = rawQuestion.trim();
       const files = fileItems ?? attachments;
-      const useEnriched = files.length > 0 || webSearch;
-      if ((!question && files.length === 0 && !webSearch) || loading) return;
+      const activeWebSearch = options?.webSearchOverride ?? webSearch;
+      const useEnriched = shouldUseEnrichedInsight(question, files.length, activeWebSearch);
+      if (loading) return;
+      if (!question && files.length === 0) return;
 
       const displayQuestion =
         question ||
@@ -437,7 +494,7 @@ export function AiAssistantChat({
 
       try {
         const request = useEnriched
-          ? askAssistantInsightWithFiles(scopedPayload, question, filesToSend, webSearch, assistantOptions)
+          ? askAssistantInsightWithFiles(scopedPayload, question, filesToSend, activeWebSearch, assistantOptions)
           : askAssistantInsight(scopedPayload, question, assistantOptions);
 
         const [insight] = await Promise.all([request, new Promise((r) => setTimeout(r, thinkingDelay))]);
@@ -452,8 +509,11 @@ export function AiAssistantChat({
           rows: Array.isArray(insight.rows) ? insight.rows : [],
           details: Array.isArray(insight.details) ? insight.details : [],
           sources: Array.isArray(insight.sources) ? insight.sources : [],
-          thinkingSteps: buildThinkingSteps(insight, filesToSend.length, webSearch),
+          webSearchMeta: insight.web_search_meta ?? null,
+          aiModel: insight.ai_model ?? undefined,
+          thinkingSteps: buildThinkingSteps(insight, filesToSend.length, activeWebSearch),
           userQuestion: displayQuestion,
+          webSearchUsed: activeWebSearch || shouldAutoWebSearch(question),
         };
         onMessagesChange((prev) => [...prev, assistantMsg]);
 
@@ -471,6 +531,7 @@ export function AiAssistantChat({
             role: "assistant",
             content: fr ? "Désolé, une erreur s'est produite. Réessayez." : "Sorry, something went wrong. Please try again.",
             createdAt: new Date().toISOString(),
+            userQuestion: displayQuestion,
           },
         ]);
       } finally {
@@ -533,12 +594,24 @@ export function AiAssistantChat({
 
   const regenerateMessage = useCallback(
     (msg: ChatMessage) => {
-      const question = msg.userQuestion?.trim();
-      if (!question || loading) return;
+      if (loading) return;
+
+      let question = msg.userQuestion?.trim();
+      if (!question) {
+        const idx = messages.findIndex((m) => m.id === msg.id);
+        for (let i = idx - 1; i >= 0; i -= 1) {
+          if (messages[i]?.role === "user") {
+            question = messages[i].content.trim();
+            break;
+          }
+        }
+      }
+      if (!question) return;
+
       onMessagesChange((prev) => prev.filter((m) => m.id !== msg.id));
-      void submitQuestion(question);
+      void submitQuestion(question, undefined, { webSearchOverride: msg.webSearchUsed ?? webSearch });
     },
-    [loading, submitQuestion],
+    [loading, messages, onMessagesChange, submitQuestion, webSearch],
   );
 
   const handleFilePick = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -622,20 +695,17 @@ export function AiAssistantChat({
 
   return (
     <div className="ai-copilot-widget relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-3">
+      <header className="flex shrink-0 items-center justify-between border-b border-slate-200/80 bg-gradient-to-r from-white via-teal-50/40 to-white px-5 py-3.5">
         <div className="flex items-center gap-2">
-          <IconSpark className="ai-copilot-icon h-4 w-4 text-red-600" />
+          <IconSpark className="ai-copilot-icon h-4 w-4 text-teal-600" />
           <div>
-            <p className="text-sm font-semibold tracking-wide text-slate-800">RAN Intelligence</p>
-            {engineStatus ? (
-              <p className="text-[10px] text-slate-400">
-                {engineStatus.claude?.enabled
-                  ? `Claude · ${engineStatus.claude.model ?? "docs"}`
-                  : engineStatus.engine === "openai"
-                    ? `${t(language, "ai_engine_openai")} · ${engineStatus.model ?? "OpenAI"}`
-                    : t(language, "ai_engine_local")}
-              </p>
-            ) : null}
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-semibold tracking-wide text-slate-800">{t(language, "ai_copilot_name")}</p>
+              <span className="rounded-full bg-teal-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-teal-700">
+                {t(language, "ai_copilot_suite")}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-400">{engineSubtitle || t(language, "ai_copilot_tagline")}</p>
           </div>
         </div>
         <button
@@ -644,7 +714,7 @@ export function AiAssistantChat({
             resetLocalChat();
             onNewChat();
           }}
-          className="ai-copilot-icon rounded-lg p-1.5 text-red-600 transition hover:bg-red-50"
+          className="ai-copilot-icon rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
           title={t(language, "ai_new_chat")}
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
@@ -655,38 +725,70 @@ export function AiAssistantChat({
 
       <div ref={scrollRef} className="ai-chat-scroll flex-1 overflow-y-auto px-6 py-5">
         {!hasConversation && !loading ? (
-          <div className="flex h-full min-h-[280px] flex-col items-center justify-center px-6 text-center">
-            <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">{t(language, "ai_greeting")}</h1>
-            <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-500">{t(language, "ai_greeting_hint")}</p>
+          <div className="flex h-full min-h-[280px] flex-col items-center justify-center px-4 text-center">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-lg shadow-teal-500/20">
+              <IconSpark className="h-7 w-7" />
+            </div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-600">
+              {t(language, "ai_copilot_suite")} · {t(language, "ai_copilot_tagline")}
+            </p>
+            <h1 className="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">{t(language, "ai_greeting")}</h1>
+            <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">{t(language, "ai_greeting_hint")}</p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              {(["ai_cap_web", "ai_cap_xml", "ai_cap_capture", "ai_cap_data"] as const).map((key) => (
+                <span
+                  key={key}
+                  className="rounded-full border border-teal-100 bg-teal-50/60 px-3 py-1 text-[11px] font-medium text-teal-800"
+                >
+                  {t(language, key)}
+                </span>
+              ))}
+            </div>
+            <div className="mt-6 flex w-full max-w-xl flex-col gap-2">
+              {promptSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => void submitQuestion(suggestion)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50/40 hover:text-teal-900"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
             {messages.map((msg) => (
-              <article key={msg.id} className={msg.role === "user" ? "flex justify-end" : ""}>
-                <div className={`max-w-[92%] ${msg.role === "user" ? "text-right" : "text-left"}`}>
+              <article
+                key={msg.id}
+                className={msg.role === "user" ? "flex justify-end" : "flex items-start gap-3"}
+              >
+                {msg.role === "assistant" ? (
+                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-sm">
+                    <IconSpark className="h-4 w-4" />
+                  </div>
+                ) : null}
+                <div className={`max-w-[92%] ${msg.role === "user" ? "text-right" : "text-left min-w-0 flex-1"}`}>
+                  {msg.role === "assistant" ? (
+                    <div className="mb-1.5 flex items-baseline gap-2">
+                      <p className="text-[11px] font-semibold text-slate-800">{t(language, "ai_copilot_name")}</p>
+                      {msg.aiModel ? <span className="text-[10px] text-slate-400">{msg.aiModel}</span> : null}
+                    </div>
+                  ) : null}
                   <div
-                    className={`group relative rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                    className={`rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                       msg.role === "user" ? "ai-msg-user text-slate-800" : "ai-msg-assistant text-slate-700"
                     }`}
                   >
-                    {msg.role === "assistant" ? (
-                      <button
-                        type="button"
-                        onClick={() => void copyToClipboard(msg.content)}
-                        className="absolute right-2 top-2 rounded-md p-1 text-red-400 opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600"
-                        title={t(language, "ai_copy")}
-                      >
-                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                          <rect x="9" y="9" width="11" height="11" rx="2" />
-                          <path d="M5 15V5a2 2 0 0 1 2-2h10" />
-                        </svg>
-                      </button>
-                    ) : null}
                     {msg.role === "assistant" ? <MessageBody content={msg.content} /> : <p>{msg.content}</p>}
                     {msg.attachments?.length ? (
                       <p className="mt-1.5 text-[10px] text-slate-400">📎 {msg.attachments.join(", ")}</p>
                     ) : null}
                   </div>
+                  {msg.role === "assistant" && msg.webSearchMeta ? (
+                    <AiWebSourcesPanel language={language} meta={msg.webSearchMeta} />
+                  ) : null}
                   {msg.role === "assistant" ? (
                     <>
                       <AiMessageActions
@@ -694,6 +796,7 @@ export function AiAssistantChat({
                         messageId={msg.id}
                         content={msg.content}
                         speaking={speakingId === msg.id}
+                        loading={loading}
                         feedback={msg.feedback}
                         showData={Boolean(dataOpenIds[msg.id])}
                         onToggleSpeak={() => toggleSpeakMessage(msg.id, msg.content)}
@@ -706,7 +809,12 @@ export function AiAssistantChat({
                         }
                       />
                       {dataOpenIds[msg.id] ? (
-                        <DataPanel language={language} rows={msg.rows ?? []} details={msg.details ?? []} sources={msg.sources ?? []} />
+                        <DataPanel
+                          language={language}
+                          rows={msg.rows ?? []}
+                          details={msg.details ?? []}
+                          sources={(msg.sources ?? []).filter((s) => s.type !== "web")}
+                        />
                       ) : null}
                     </>
                   ) : null}
@@ -714,10 +822,15 @@ export function AiAssistantChat({
               </article>
             ))}
             {loading ? (
-              <div className="flex items-center gap-2 px-1 py-2 text-xs text-slate-500">
-                {mode === "thinking" ? t(language, "ai_thinking") : t(language, "ai_processing")}
-                <ThinkingDots />
-              </div>
+              <article className="flex items-start gap-3">
+                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-sm">
+                  <IconSpark className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="mb-1.5 text-[11px] font-semibold text-slate-800">{t(language, "ai_copilot_name")}</p>
+                  <AiResearchProgress language={language} active={loading} withWeb={webSearch} />
+                </div>
+              </article>
             ) : null}
           </div>
         )}
@@ -730,54 +843,13 @@ export function AiAssistantChat({
       ) : null}
 
       {(listening || speaking) ? (
-        <p className="mb-1.5 text-center text-xs font-medium text-red-600">
+        <p className="mb-1.5 text-center text-xs font-medium text-teal-700">
           {speaking ? t(language, "ai_speaking") : t(language, "ai_listening")}
         </p>
       ) : null}
 
       <form onSubmit={onSubmit} className="shrink-0 border-t border-slate-100 px-5 pb-4 pt-3">
-        <div className="ai-copilot-input flex items-end gap-1 rounded-2xl px-2 py-2">
-          <div ref={attachRef} className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setAttachOpen((v) => !v)}
-              className={`ai-copilot-icon flex h-10 w-10 items-center justify-center rounded-full transition ${
-                attachOpen || webSearch ? "bg-red-50 text-red-600" : "text-red-600"
-              }`}
-              aria-label={t(language, "ai_attach")}
-            >
-              <IconPlus className="h-5 w-5" />
-            </button>
-            <AiAttachMenu
-              language={language}
-              open={attachOpen}
-              webSearch={webSearch}
-              recentFiles={recentFiles}
-              recentOpen={recentOpen}
-              screenshotLoading={screenshotLoading}
-              onPickFiles={() => fileInputRef.current?.click()}
-              onScreenshot={() => void handleScreenshot()}
-              onCamera={() => {
-                setAttachOpen(false);
-                setCameraOpen(true);
-              }}
-              onToggleWebSearch={() => {
-                setWebSearch((v) => !v);
-                setAttachOpen(false);
-              }}
-              onToggleRecent={() => setRecentOpen((v) => !v)}
-              onSelectRecent={(id) => void handleRecentSelect(id)}
-            />
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".xml,.csv,.json,.txt,.log,.md,.png,.jpg,.jpeg,.webp,.gif,image/*"
-              className="hidden"
-              onChange={handleFilePick}
-            />
-          </div>
-
+        <div className="ai-copilot-input flex flex-col gap-2 rounded-2xl px-3 py-2.5">
           <textarea
             ref={textareaRef}
             value={input}
@@ -790,84 +862,150 @@ export function AiAssistantChat({
             }}
             rows={1}
             placeholder={t(language, "ai_input_placeholder")}
-            className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+            className="max-h-32 min-h-[40px] w-full resize-none bg-transparent px-1 py-1 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
           />
 
-          <div ref={modeRef} className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setModeOpen((v) => !v)}
-              className="ai-copilot-icon flex items-center gap-1 rounded-full px-2.5 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-            >
-              {mode === "thinking" ? t(language, "ai_mode_thinking") : t(language, "ai_mode_instant")}
-              <IconChevron className="h-3.5 w-3.5" />
-            </button>
-            {modeOpen ? (
-              <div className="absolute bottom-full right-0 z-30 mb-2 w-36 rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
-                {(["instant", "thinking"] as const).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => {
-                      setMode(item);
-                      setModeOpen(false);
-                    }}
-                    className={`block w-full px-4 py-2.5 text-left text-sm transition hover:bg-red-50 ${
-                      mode === item ? "font-semibold text-red-600" : "text-slate-600"
-                    }`}
-                  >
-                    {t(language, item === "instant" ? "ai_mode_instant" : "ai_mode_thinking")}
-                  </button>
-                ))}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1">
+              <div ref={attachRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAttachOpen((v) => !v)}
+                  className={`ai-copilot-icon flex h-9 w-9 items-center justify-center rounded-full transition ${
+                    attachOpen || webSearch ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:text-teal-700"
+                  }`}
+                  aria-label={t(language, "ai_attach")}
+                >
+                  <IconPlus className="h-5 w-5" />
+                </button>
+                <AiAttachMenu
+                  language={language}
+                  open={attachOpen}
+                  webSearch={webSearch}
+                  recentFiles={recentFiles}
+                  recentOpen={recentOpen}
+                  screenshotLoading={screenshotLoading}
+                  onPickFiles={() => fileInputRef.current?.click()}
+                  onScreenshot={() => void handleScreenshot()}
+                  onCamera={() => {
+                    setAttachOpen(false);
+                    setCameraOpen(true);
+                  }}
+                  onToggleWebSearch={() => {
+                    setWebSearch((v) => !v);
+                    setAttachOpen(false);
+                  }}
+                  onToggleRecent={() => setRecentOpen((v) => !v)}
+                  onSelectRecent={(id) => void handleRecentSelect(id)}
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".xml,.csv,.json,.txt,.log,.md,.png,.jpg,.jpeg,.webp,.gif,image/*"
+                  className="hidden"
+                  onChange={handleFilePick}
+                />
               </div>
-            ) : null}
+
+              <div ref={modeRef} className="relative min-w-0 shrink">
+                <button
+                  type="button"
+                  onClick={() => setModeOpen((v) => !v)}
+                  disabled={loading}
+                  className="ai-copilot-icon flex max-w-full items-center gap-1 rounded-full px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-teal-700 disabled:opacity-50"
+                >
+                  <span className="truncate">
+                    {loading
+                      ? webSearch
+                        ? t(language, "ai_research_title")
+                        : t(language, "ai_thinking")
+                      : mode === "thinking"
+                        ? t(language, "ai_mode_thinking")
+                        : t(language, "ai_mode_instant")}
+                  </span>
+                  <IconChevron className="h-3.5 w-3.5 shrink-0" />
+                </button>
+                {modeOpen ? (
+                  <div className="absolute bottom-full left-0 z-30 mb-2 w-44 rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                    {(["instant", "thinking"] as const).map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => {
+                          setMode(item);
+                          setModeOpen(false);
+                        }}
+                        className={`block w-full px-4 py-2.5 text-left text-sm transition hover:bg-teal-50 ${
+                          mode === item ? "font-semibold text-teal-700" : "text-slate-600"
+                        }`}
+                      >
+                        {t(language, item === "instant" ? "ai_mode_instant" : "ai_mode_thinking")}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleMicrophone}
+                className={`ai-copilot-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition ${
+                  listening ? "ai-voice-pulse bg-teal-600 text-white" : "text-slate-600 hover:text-teal-700"
+                }`}
+                title={t(language, "ai_voice_input")}
+              >
+                <IconMic className="h-5 w-5" />
+              </button>
+
+              <button
+                type={input.trim() || attachments.length || (webSearch && input.trim()) ? "submit" : "button"}
+                disabled={loading}
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 ${
+                  voiceLive || input.trim() || attachments.length
+                    ? "bg-teal-600 text-white shadow-md hover:bg-teal-700"
+                    : "ai-copilot-icon text-slate-600 hover:text-teal-700"
+                }`}
+                onClick={(e) => {
+                  if (!input.trim() && attachments.length === 0) {
+                    e.preventDefault();
+                    const next = !voiceLive;
+                    setVoiceLive(next);
+                    if (next) void startListening(true);
+                    else stopListening();
+                  }
+                }}
+                title={
+                  input.trim() || attachments.length
+                    ? t(language, "ask")
+                    : voiceLive
+                      ? t(language, "ai_voice_live_on")
+                      : t(language, "ai_voice_live")
+                }
+              >
+                {input.trim() || attachments.length ? (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : (
+                  <IconWave className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </div>
-
-          <button
-            type="button"
-            onClick={toggleMicrophone}
-            className={`ai-copilot-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition ${
-              listening ? "ai-voice-pulse bg-red-600 text-white" : "text-red-600"
-            }`}
-            title={t(language, "ai_voice_input")}
-          >
-            <IconMic className="h-5 w-5" />
-          </button>
-
-          <button
-            type={input.trim() || attachments.length || (webSearch && input.trim()) ? "submit" : "button"}
-            disabled={loading}
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 ${
-              voiceLive || input.trim() || attachments.length
-                ? "bg-red-600 text-white shadow-md hover:bg-red-700"
-                : "ai-copilot-icon text-red-600"
-            }`}
-            onClick={(e) => {
-              if (!input.trim() && attachments.length === 0) {
-                e.preventDefault();
-                const next = !voiceLive;
-                setVoiceLive(next);
-                if (next) void startListening(true);
-                else stopListening();
-              }
-            }}
-            title={
-              input.trim() || attachments.length
-                ? t(language, "ask")
-                : voiceLive
-                  ? t(language, "ai_voice_live_on")
-                  : t(language, "ai_voice_live")
-            }
-          >
-            <IconWave className="h-4 w-4" />
-          </button>
         </div>
 
         {(attachments.length > 0 || webSearch) ? (
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {webSearch ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                🌐 {t(language, "ai_web_search_on")}
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18" />
+                </svg>
+                {t(language, "ai_web_search_on")}
                 <button type="button" onClick={() => setWebSearch(false)} className="text-emerald-500 hover:text-emerald-800">
                   ×
                 </button>
@@ -888,11 +1026,19 @@ export function AiAssistantChat({
                 <span className="text-slate-400">({file.sizeLabel})</span>
                 <button
                   type="button"
+                  onClick={() => downloadBlobFile(file.file, file.name)}
+                  className="text-teal-600 hover:text-teal-800"
+                  title={fr ? "Télécharger" : "Download"}
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
                     setAttachments((prev) => prev.filter((a) => a.id !== file.id));
                   }}
-                  className="text-red-400 hover:text-red-600"
+                  className="text-slate-400 hover:text-slate-700"
                 >
                   ×
                 </button>
@@ -901,6 +1047,7 @@ export function AiAssistantChat({
           </div>
         ) : null}
 
+        <p className="mt-2 px-1 text-center text-[10px] leading-relaxed text-slate-400">{t(language, "ai_compliance_footer")}</p>
       </form>
 
       <AiCameraModal

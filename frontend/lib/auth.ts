@@ -31,13 +31,25 @@ export type JobProfile = {
 const ACCESS_KEY = "ran_access_token";
 const REFRESH_KEY = "ran_refresh_token";
 const USER_KEY = "ran_user";
+// Cookie de navigation : durée alignée sur le refresh token (pas sur l'access token court).
+export const AUTH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60;
+
+function writeAuthCookie(): void {
+  document.cookie = `ran_auth=1; path=/; max-age=${AUTH_COOKIE_MAX_AGE}; SameSite=Lax`;
+}
 
 export function saveSession(session: AuthSession): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(ACCESS_KEY, session.access_token);
   localStorage.setItem(REFRESH_KEY, session.refresh_token);
   localStorage.setItem(USER_KEY, JSON.stringify(session.user));
-  document.cookie = `ran_auth=1; path=/; max-age=${session.expires_in}; SameSite=Lax`;
+  writeAuthCookie();
+}
+
+export function touchAuthCookie(): void {
+  if (typeof window === "undefined") return;
+  if (!getAccessToken()) return;
+  writeAuthCookie();
 }
 
 export function clearSession(): void {

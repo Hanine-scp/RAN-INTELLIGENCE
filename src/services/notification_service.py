@@ -14,12 +14,25 @@ logger = logging.getLogger(__name__)
 
 OTP_MINUTES = int(os.getenv("AUTH_OTP_MINUTES", "10"))
 BRAND = os.getenv("NOTIFY_BRAND_NAME", "RAN Intelligence · Ooredoo")
+TWILIO_VERIFY_MARKER = "__TWILIO_VERIFY__"
+WEBOTP_DOMAIN = (
+    os.getenv("APP_WEBOTP_DOMAIN", "").strip()
+    or os.getenv("APP_FRONTEND_URL", os.getenv("FRONTEND_URL", "http://localhost:3000"))
+    .replace("https://", "")
+    .replace("http://", "")
+    .split("/")[0]
+    .strip()
+)
 
 PURPOSE_LABELS = {
     "signup_verify": "activation de votre compte",
     "login_mfa": "connexion sécurisée",
     "admin_login": "connexion administrateur",
+    "admin_bootstrap": "activation administrateur",
     "provision_verify": "activation de votre compte",
+    "email_verify": "vérification de votre adresse email",
+    "password_reset": "réinitialisation de mot de passe",
+    "password_reset_sms": "réinitialisation de mot de passe",
 }
 
 
@@ -27,24 +40,72 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_placeholder(value: str) -> bool:
+    raw = value.strip()
+    if not raw:
+        return True
+    lower = raw.lower()
+    if lower == "api":
+        return False
+    if lower.startswith("ac") and set(lower[2:].replace("0", "")) <= {"x"}:
+        return True
+    markers = ("votre_", "your_", "change-me", "xxxxxxxx", "<your", "placeholder", "example.com token")
+    if any(m in lower for m in markers):
+        return True
+    if len(raw) >= 8 and set(lower) <= {"x"}:
+        return True
+    return False
+
+
 class NotificationService:
     def __init__(self) -> None:
         self.smtp_host = os.getenv("SMTP_HOST", "").strip()
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_user = os.getenv("SMTP_USER", "").strip()
-        self.smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
+        self.smtp_password = (os.getenv("SMTP_PASS") or os.getenv("SMTP_PASSWORD", "")).strip()
         self.smtp_from = os.getenv("SMTP_FROM", self.smtp_user).strip()
         self.smtp_use_tls = _truthy(os.getenv("SMTP_USE_TLS", "true"))
         self.twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
         self.twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
         self.twilio_from = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+        self.twilio_sms_sender = os.getenv("TWILIO_SMS_SENDER_ID", "").strip()
+        self.twilio_verify_sid = os.getenv("TWILIO_VERIFY_SERVICE_SID", "").strip()
         self.enabled = _truthy(os.getenv("AUTH_NOTIFICATIONS_ENABLED", "false"))
 
     def email_ready(self) -> bool:
-        return bool(self.enabled and self.smtp_host and self.smtp_from)
+        return bool(
+            self.enabled
+            and self.smtp_host
+            and self.smtp_from
+            and self.smtp_user
+            and self.smtp_password
+            and not _is_placeholder(self.smtp_user)
+            and not _is_placeholder(self.smtp_password)
+        )
 
     def sms_ready(self) -> bool:
-        return bool(self.enabled and self.twilio_sid and self.twilio_token and self.twilio_from)
+        if not (self.enabled and self.twilio_sid and self.twilio_token):
+            return False
+        if _is_placeholder(self.twilio_sid) or _is_placeholder(self.twilio_token):
+            return False
+        if self.twilio_verify_ready():
+            return True
+        from_number = self.twilio_from or self.twilio_sms_sender
+        return bool(from_number and not _is_placeholder(from_number))
+
+    def twilio_verify_ready(self) -> bool:
+        return bool(
+            self.enabled
+            and self.twilio_sid
+            and self.twilio_token
+            and self.twilio_verify_sid
+            and not _is_placeholder(self.twilio_sid)
+            and not _is_placeholder(self.twilio_token)
+            and not _is_placeholder(self.twilio_verify_sid)
+        )
+
+    def _sms_from(self) -> str:
+        return self.twilio_sms_sender or self.twilio_from
 
     @staticmethod
     def format_phone_e164(phone: str) -> str:
@@ -106,9 +167,11 @@ class NotificationService:
         message.attach(MIMEText(text_body, "plain", "utf-8"))
         message.attach(MIMEText(html_body, "html", "utf-8"))
         try:
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=20) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
+                server.ehlo()
                 if self.smtp_use_tls:
                     server.starttls()
+                    server.ehlo()
                 if self.smtp_user and self.smtp_password:
                     server.login(self.smtp_user, self.smtp_password)
                 server.sendmail(self.smtp_from, [to], message.as_string())
@@ -143,7 +206,7 @@ class NotificationService:
             response = requests.post(
                 f"https://api.twilio.com/2010-04-01/Accounts/{self.twilio_sid}/Messages.json",
                 auth=(self.twilio_sid, self.twilio_token),
-                data={"From": self.twilio_from, "To": to_number, "Body": body},
+                data={"From": self._sms_from(), "To": to_number, "Body": body},
                 timeout=20,
             )
             if response.status_code >= 400:
@@ -196,8 +259,76 @@ class NotificationService:
 
     def send_otp_sms(self, *, phone: str, code: str, purpose: str, user_id: int | None = None) -> bool:
         label = self._purpose_label(purpose)
-        body = f"{BRAND}: code {label} = {code}. Valide {OTP_MINUTES} min. Ne partagez pas ce code."
+        body = (
+            f"{BRAND}: code {label} = {code}. Valide {OTP_MINUTES} min. Ne partagez pas ce code.\n\n"
+            f"@{WEBOTP_DOMAIN} #{code}"
+        )
         return self._send_sms(phone, body, purpose=purpose, user_id=user_id)
+
+    def start_twilio_verify(self, *, phone: str, purpose: str, user_id: int | None = None) -> bool:
+        if not self.twilio_verify_ready():
+            return False
+        to_number = self.format_phone_e164(phone)
+        try:
+            response = requests.post(
+                f"https://verify.twilio.com/v2/Services/{self.twilio_verify_sid}/Verifications",
+                auth=(self.twilio_sid, self.twilio_token),
+                data={"To": to_number, "Channel": "sms"},
+                timeout=20,
+            )
+            if response.status_code >= 400:
+                logger.error("Twilio Verify start failed for %s: %s %s", to_number, response.status_code, response.text)
+                self._log_delivery(
+                    channel="phone",
+                    destination=to_number,
+                    purpose=purpose,
+                    status="failed",
+                    user_id=user_id,
+                    detail=response.text[:240],
+                )
+                return False
+            logger.info("Twilio Verify started for %s", to_number)
+            self._log_delivery(channel="phone", destination=to_number, purpose=purpose, status="sent", user_id=user_id, detail="twilio_verify")
+            return True
+        except Exception as exc:
+            logger.error("Twilio Verify start failed for %s: %s", to_number, exc)
+            self._log_delivery(
+                channel="phone",
+                destination=to_number,
+                purpose=purpose,
+                status="failed",
+                user_id=user_id,
+                detail=str(exc)[:240],
+            )
+            return False
+
+    def check_twilio_verify(self, *, phone: str, code: str, purpose: str, user_id: int | None = None) -> bool:
+        if not self.twilio_verify_ready():
+            return False
+        to_number = self.format_phone_e164(phone)
+        try:
+            response = requests.post(
+                f"https://verify.twilio.com/v2/Services/{self.twilio_verify_sid}/VerificationCheck",
+                auth=(self.twilio_sid, self.twilio_token),
+                data={"To": to_number, "Code": code},
+                timeout=20,
+            )
+            if response.status_code >= 400:
+                return False
+            payload = response.json()
+            approved = str(payload.get("status", "")).lower() == "approved"
+            self._log_delivery(
+                channel="phone",
+                destination=to_number,
+                purpose=purpose,
+                status="verified" if approved else "failed",
+                user_id=user_id,
+                detail=str(payload.get("status", ""))[:120],
+            )
+            return approved
+        except Exception as exc:
+            logger.error("Twilio Verify check failed for %s: %s", to_number, exc)
+            return False
 
     def send_access_key_email(
         self,
@@ -277,6 +408,44 @@ class NotificationService:
             return self.send_otp_sms(phone=phone, code=code, purpose=purpose, user_id=user_id)
         return False
 
+    def send_email_verification(
+        self,
+        *,
+        to: str,
+        full_name: str,
+        verify_url: str,
+        expires_hours: int,
+        user_id: int | None = None,
+    ) -> bool:
+        from src.services.email_templates import verification_email
+
+        subject, text, html = verification_email(
+            full_name=full_name,
+            verify_url=verify_url,
+            expires_hours=expires_hours,
+            brand=BRAND,
+        )
+        return self._send_email(to, subject, text, html, purpose="email_verify", user_id=user_id)
+
+    def send_password_reset(
+        self,
+        *,
+        to: str,
+        full_name: str,
+        reset_url: str,
+        expires_hours: int,
+        user_id: int | None = None,
+    ) -> bool:
+        from src.services.email_templates import password_reset_email
+
+        subject, text, html = password_reset_email(
+            full_name=full_name,
+            reset_url=reset_url,
+            expires_hours=expires_hours,
+            brand=BRAND,
+        )
+        return self._send_email(to, subject, text, html, purpose="password_reset", user_id=user_id)
+
     def deliver_session_key(
         self,
         *,
@@ -298,6 +467,8 @@ class NotificationService:
             "enabled": self.enabled,
             "email_ready": self.email_ready(),
             "sms_ready": self.sms_ready(),
+            "twilio_verify_ready": self.twilio_verify_ready(),
+            "sms_sender_id": self.twilio_sms_sender or None,
         }
 
 

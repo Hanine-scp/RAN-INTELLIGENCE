@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import contextvars
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
+
+DATE_FOLDER_PATTERN = re.compile(r"^\d{4}[.\-_]\d{2}[.\-_]\d{2}$")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DATA_ROOT = _REPO_ROOT / "data" / "lake"
@@ -30,6 +33,11 @@ class LakePaths:
     xml_root: Path
     has_sites_data: bool
     snapshot_dates: list[str]
+
+
+def normalize_snapshot_date(folder_name: str) -> str:
+    """2025.09.11 / 2025_09_11 / 2025-09-11 -> 2025-09-11"""
+    return folder_name.strip().replace(".", "-").replace("_", "-")
 
 
 def normalize_vendor(vendor: str | None) -> str:
@@ -108,15 +116,91 @@ def resolve_lake_paths(vendor: str | None = None) -> LakePaths:
     )
 
 
+def _is_date_folder(path: Path) -> bool:
+    return path.is_dir() and bool(DATE_FOLDER_PATTERN.match(path.name.strip()))
+
+
+def _list_xml_files(folder: Path) -> list[str]:
+    return sorted(
+        {
+            p.name
+            for p in folder.iterdir()
+            if p.is_file() and p.suffix.lower() == ".xml"
+        }
+    )
+
+
+def find_xml_snapshot_folder(xml_root: Path, snapshot_date: str) -> Path | None:
+    target = normalize_snapshot_date(snapshot_date)
+    if not xml_root.exists():
+        return None
+    for folder in xml_root.iterdir():
+        if _is_date_folder(folder) and normalize_snapshot_date(folder.name) == target:
+            return folder
+    return None
+
+
+def discover_xml_snapshots(vendor: str | None = None) -> list[dict[str, object]]:
+    """Liste les dossiers snapshots directement depuis DATA.XML (source de vérité filtres)."""
+    paths = resolve_lake_paths(vendor)
+    xml_root = paths.xml_root
+    if not xml_root.exists():
+        return []
+
+    lake_dates = {normalize_snapshot_date(d) for d in paths.snapshot_dates}
+    snapshots: list[dict[str, object]] = []
+
+    for folder in sorted(xml_root.iterdir(), key=lambda p: normalize_snapshot_date(p.name), reverse=True):
+        if not _is_date_folder(folder):
+            continue
+        snapshot_date = normalize_snapshot_date(folder.name)
+        xml_files = _list_xml_files(folder)
+        snapshots.append(
+            {
+                "snapshot_date": snapshot_date,
+                "folder_name": folder.name,
+                "folder_path": str(folder),
+                "xml_count": len(xml_files),
+                "xml_files": xml_files,
+                "processed_in_lake": snapshot_date in lake_dates,
+            }
+        )
+    return snapshots
+
+
+def list_xml_file_options(vendor: str | None, dates: list[str]) -> list[dict[str, str]]:
+    paths = resolve_lake_paths(vendor)
+    rows: list[dict[str, str]] = []
+    for snapshot_date in dates:
+        folder = find_xml_snapshot_folder(paths.xml_root, snapshot_date)
+        if folder is None:
+            continue
+        norm_date = normalize_snapshot_date(folder.name)
+        for filename in _list_xml_files(folder):
+            rows.append({"snapshot_date": norm_date, "source_file": filename})
+    return rows
+
+
+def count_xml_files(vendor: str | None = None, dates: list[str] | None = None) -> int:
+    snapshots = discover_xml_snapshots(vendor)
+    if not dates:
+        return sum(int(s["xml_count"]) for s in snapshots)
+    allowed = {normalize_snapshot_date(d) for d in dates}
+    return sum(int(s["xml_count"]) for s in snapshots if s["snapshot_date"] in allowed)
+
+
 def vendor_status(vendor: str | None = None) -> dict:
     paths = resolve_lake_paths(vendor)
+    xml_snapshots = discover_xml_snapshots(vendor)
+    xml_dates = [str(s["snapshot_date"]) for s in xml_snapshots]
     return {
         "vendor": paths.vendor,
         "lake_ready": paths.has_sites_data,
-        "snapshot_count": len(paths.snapshot_dates),
-        "latest_snapshot": paths.snapshot_dates[0] if paths.snapshot_dates else "",
+        "snapshot_count": len(xml_dates) or len(paths.snapshot_dates),
+        "latest_snapshot": xml_dates[0] if xml_dates else (paths.snapshot_dates[0] if paths.snapshot_dates else ""),
         "data_root": str(paths.root),
         "xml_root": str(paths.xml_root),
+        "xml_snapshots": xml_snapshots,
         "phase": "live" if paths.vendor == "nokia" and paths.has_sites_data else "scaffold",
     }
 

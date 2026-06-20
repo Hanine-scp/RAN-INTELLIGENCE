@@ -1,7 +1,8 @@
 import os
 import re
+import threading
 import time
-from collections import deque
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,9 +11,40 @@ from typing import Any
 import duckdb
 import pandas as pd
 
-from src.services.vendor_lake import DATA_ROOT, resolve_lake_paths, set_active_vendor
+from src.parsers.nokia_parser import FINAL_EQUIPMENT_TYPES
+from src.parsers.parsed_values import duckdb_field_is_missing
+from src.services.vendor_lake import (
+    DATA_ROOT,
+    count_xml_files,
+    discover_xml_snapshots,
+    list_xml_file_options,
+    normalize_snapshot_date,
+    resolve_lake_paths,
+    set_active_vendor,
+)
+
+_FINAL_EQUIPMENT_SQL = ", ".join(f"'{value}'" for value in sorted(FINAL_EQUIPMENT_TYPES))
 
 _QUERY_TIMINGS_MS: deque[float] = deque(maxlen=300)
+_QUERY_LABELED_MS: deque[tuple[str, float]] = deque(maxlen=500)
+_DUCK_LOCK = threading.Lock()
+_DUCK_CONN: duckdb.DuckDBPyConnection | None = None
+_QUERY_TIMEOUT_MS = int(os.getenv("DUCKDB_QUERY_TIMEOUT_MS", "30000"))
+
+
+def _get_duck_conn() -> duckdb.DuckDBPyConnection:
+    global _DUCK_CONN
+    if _DUCK_CONN is None:
+        _DUCK_CONN = duckdb.connect(database=":memory:")
+    return _DUCK_CONN
+
+
+def _percentile_ms(values: list[float], ratio: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, int(ratio * (len(ordered) - 1)))
+    return float(ordered[idx])
 
 
 def _lake():
@@ -101,32 +133,80 @@ def lake_ready(vendor: str | None = None) -> bool:
     return resolve_lake_paths(vendor).has_sites_data
 
 
-def query(sql: str, params: list[Any] | None = None) -> pd.DataFrame:
+def query(sql: str, params: list[Any] | None = None, *, label: str = "generic") -> pd.DataFrame:
+    lake = _lake()
+    if not lake.has_sites_data and "read_parquet" in sql.lower():
+        return pd.DataFrame()
+
     start = time.perf_counter()
-    with duckdb.connect(database=":memory:") as con:
-        if params:
-            result = con.execute(sql, params).fetchdf()
-        else:
-            result = con.execute(sql).fetchdf()
-    _QUERY_TIMINGS_MS.append((time.perf_counter() - start) * 1000)
+    try:
+        with _DUCK_LOCK:
+            con = _get_duck_conn()
+            if params:
+                result = con.execute(sql, params).fetchdf()
+            else:
+                result = con.execute(sql).fetchdf()
+    except duckdb.IOException as exc:
+        if "No files found" in str(exc):
+            return pd.DataFrame()
+        raise
+    except duckdb.Error as exc:
+        if "timeout" in str(exc).lower() or "interrupted" in str(exc).lower():
+            raise TimeoutError(f"Query timed out after {_QUERY_TIMEOUT_MS}ms ({label})") from exc
+        raise
+
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    _QUERY_TIMINGS_MS.append(elapsed_ms)
+    _QUERY_LABELED_MS.append((label, elapsed_ms))
     return result
 
 
-def get_query_observability() -> dict[str, float]:
+def get_query_observability() -> dict[str, Any]:
     if not _QUERY_TIMINGS_MS:
-        return {"samples": 0, "avg_ms": 0.0, "p95_ms": 0.0, "max_ms": 0.0}
+        return {
+            "samples": 0,
+            "avg_ms": 0.0,
+            "p50_ms": 0.0,
+            "p95_ms": 0.0,
+            "p99_ms": 0.0,
+            "max_ms": 0.0,
+            "slowest_labels": [],
+        }
     samples = list(_QUERY_TIMINGS_MS)
-    ordered = sorted(samples)
-    p95_idx = min(len(ordered) - 1, int(0.95 * (len(ordered) - 1)))
+    by_label: dict[str, list[float]] = defaultdict(list)
+    for label, duration in _QUERY_LABELED_MS:
+        by_label[label].append(duration)
+    slowest_labels = sorted(
+        (
+            {
+                "label": label,
+                "count": len(durations),
+                "avg_ms": round(sum(durations) / len(durations), 2),
+                "p95_ms": round(_percentile_ms(durations, 0.95), 2),
+                "max_ms": round(max(durations), 2),
+            }
+            for label, durations in by_label.items()
+        ),
+        key=lambda row: row["p95_ms"],
+        reverse=True,
+    )[:10]
     return {
         "samples": float(len(samples)),
         "avg_ms": round(sum(samples) / len(samples), 2),
-        "p95_ms": round(float(ordered[p95_idx]), 2),
+        "p50_ms": round(_percentile_ms(samples, 0.5), 2),
+        "p95_ms": round(_percentile_ms(samples, 0.95), 2),
+        "p99_ms": round(_percentile_ms(samples, 0.99), 2),
         "max_ms": round(float(max(samples)), 2),
+        "timeout_ms": float(_QUERY_TIMEOUT_MS),
+        "slowest_labels": slowest_labels,
     }
 
 
 def get_snapshot_dates() -> list[str]:
+    xml_dates = [str(s["snapshot_date"]) for s in discover_xml_snapshots()]
+    if xml_dates:
+        return xml_dates
+
     df = query(
         f"""
         SELECT DISTINCT CAST(snapshot_date AS VARCHAR) AS snapshot_date
@@ -134,7 +214,7 @@ def get_snapshot_dates() -> list[str]:
         ORDER BY snapshot_date DESC
         """
     )
-    return df["snapshot_date"].tolist()
+    return [normalize_snapshot_date(d) for d in df["snapshot_date"].tolist()]
 
 
 def get_site_kpis(snapshot_date: str) -> pd.Series:
@@ -213,9 +293,9 @@ def get_object_types(snapshot_date: str) -> list[str]:
         ORDER BY
             CASE
                 WHEN object_type = 'CABINET' THEN 10
-                WHEN object_type = 'BBMOD' THEN 20
+                WHEN object_type = 'SMOD' THEN 20
                 WHEN object_type = 'RMOD' THEN 30
-                WHEN object_type = 'SMOD' THEN 40
+                WHEN object_type = 'BBMOD' THEN 40
                 WHEN object_type = 'RETU' THEN 90
                 WHEN object_type = 'ALD' THEN 91
                 WHEN object_type = 'ANTL' THEN 92
@@ -251,9 +331,9 @@ def get_equipment(snapshot_date: str, object_types: list[str] | None = None) -> 
             site_id,
             CASE
                 WHEN object_type = 'CABINET' THEN 10
-                WHEN object_type = 'BBMOD' THEN 20
+                WHEN object_type = 'SMOD' THEN 20
                 WHEN object_type = 'RMOD' THEN 30
-                WHEN object_type = 'SMOD' THEN 40
+                WHEN object_type = 'BBMOD' THEN 40
                 WHEN object_type = 'RETU' THEN 90
                 WHEN object_type = 'ALD' THEN 91
                 WHEN object_type = 'ANTL' THEN 92
@@ -267,7 +347,7 @@ def get_equipment(snapshot_date: str, object_types: list[str] | None = None) -> 
 
 
 def get_delta_metrics() -> pd.DataFrame:
-    if not Path(DELTA_PATH).exists():
+    if not Path(_lake().delta).exists():
         return pd.DataFrame()
     return query(
         f"""
@@ -279,7 +359,7 @@ def get_delta_metrics() -> pd.DataFrame:
 
 
 def get_site_changes() -> pd.DataFrame:
-    if not Path(SITE_CHANGES_PATH).exists():
+    if not Path(_lake().site_changes).exists():
         return pd.DataFrame()
     return query(
         f"""
@@ -318,35 +398,41 @@ class DataService:
     }
 
     def get_filter_options(self, ctx: FilterContext) -> dict[str, Any]:
-        date_options = get_snapshot_dates()
+        lake = _lake()
+        xml_snapshots = discover_xml_snapshots(ctx.vendor)
+        date_options = [str(s["snapshot_date"]) for s in xml_snapshots] or get_snapshot_dates()
+
         total_sites_df = query(
             f"""
             SELECT COUNT(DISTINCT CAST(site_id AS VARCHAR) || '-' || CAST(snapshot_date AS VARCHAR)) AS total_sites
-            FROM read_parquet('{_lake().sites}')
+            FROM read_parquet('{lake.sites}')
             """
         )
-        total_xml_df = query(
-            f"""
-            SELECT COUNT(DISTINCT CAST(source_file AS VARCHAR) || '-' || CAST(snapshot_date AS VARCHAR)) AS total_xml
-            FROM read_parquet('{_lake().sites}')
-            """
-        )
+        total_sites = int(total_sites_df.iloc[0]["total_sites"]) if not total_sites_df.empty else 0
+        if total_sites == 0:
+            total_sites = count_xml_files(ctx.vendor)
+
+        total_xml = count_xml_files(ctx.vendor)
 
         file_options: list[dict[str, str]] = []
         if ctx.selected_dates:
-            date_clause, date_params = _in_clause(ctx.selected_dates)
-            files_df = query(
-                f"""
-                SELECT DISTINCT
-                    CAST(snapshot_date AS VARCHAR) AS snapshot_date,
-                    CAST(source_file AS VARCHAR) AS source_file
-                FROM read_parquet('{_lake().sites}')
-                WHERE CAST(snapshot_date AS VARCHAR) IN {date_clause}
-                ORDER BY snapshot_date DESC, source_file
-                """,
-                date_params,
-            )
-            file_options = files_df.to_dict(orient="records")
+            file_options = list_xml_file_options(ctx.vendor, ctx.selected_dates)
+            if not file_options and lake.has_sites_data:
+                date_clause, date_params = _in_clause(
+                    [normalize_snapshot_date(d) for d in ctx.selected_dates]
+                )
+                files_df = query(
+                    f"""
+                    SELECT DISTINCT
+                        CAST(snapshot_date AS VARCHAR) AS snapshot_date,
+                        CAST(source_file AS VARCHAR) AS source_file
+                    FROM read_parquet('{lake.sites}')
+                    WHERE CAST(snapshot_date AS VARCHAR) IN {date_clause}
+                    ORDER BY snapshot_date DESC, source_file
+                    """,
+                    date_params,
+                )
+                file_options = files_df.to_dict(orient="records")
 
         site_options: list[dict[str, str]] = []
         if ctx.effective_dates and ctx.selected_files:
@@ -383,12 +469,32 @@ class DataService:
             )
             site_options = sites_df.to_dict(orient="records")
 
+        processed_dates = {
+            str(s["snapshot_date"])
+            for s in xml_snapshots
+            if bool(s.get("processed_in_lake"))
+        }
+        xml_snapshots_meta = [
+            {
+                "snapshot_date": s["snapshot_date"],
+                "folder_name": s["folder_name"],
+                "xml_count": s["xml_count"],
+                "processed_in_lake": s.get("processed_in_lake", False),
+            }
+            for s in xml_snapshots
+        ]
         return {
             "date_options": date_options,
             "file_options": file_options,
             "site_options": site_options,
-            "total_sites": int(total_sites_df.iloc[0]["total_sites"]) if not total_sites_df.empty else 0,
-            "total_xml": int(total_xml_df.iloc[0]["total_xml"]) if not total_xml_df.empty else 0,
+            "total_sites": total_sites,
+            "total_xml": total_xml,
+            "lake_ready": lake.has_sites_data,
+            "vendor": lake.vendor,
+            "vendor_phase": "live" if lake.has_sites_data else "scaffold",
+            "xml_root": str(lake.xml_root),
+            "xml_snapshots": xml_snapshots_meta,
+            "processed_dates": sorted(processed_dates, reverse=True),
         }
 
     def _site_and_equipment_where(self, ctx: FilterContext) -> tuple[str, list[Any], str, list[Any]]:
@@ -413,16 +519,16 @@ class DataService:
         return " AND ".join(site_clauses), site_params, " AND ".join(equipment_clauses), equipment_params
 
     @staticmethod
-    def _object_order_case() -> str:
-        return """
+    def _object_order_case(column: str = "object_type") -> str:
+        return f"""
             CASE
-                WHEN object_type = 'CABINET' THEN 10
-                WHEN object_type = 'BBMOD' THEN 20
-                WHEN object_type = 'RMOD' THEN 30
-                WHEN object_type = 'SMOD' THEN 40
-                WHEN object_type = 'RETU' THEN 90
-                WHEN object_type = 'ALD' THEN 91
-                WHEN object_type = 'ANTL' THEN 92
+                WHEN {column} = 'CABINET' THEN 10
+                WHEN {column} = 'SMOD' THEN 20
+                WHEN {column} = 'RMOD' THEN 30
+                WHEN {column} = 'BBMOD' THEN 40
+                WHEN {column} = 'RETU' THEN 90
+                WHEN {column} = 'ALD' THEN 91
+                WHEN {column} = 'ANTL' THEN 92
                 ELSE 50
             END
         """.strip()
@@ -436,15 +542,14 @@ class DataService:
         _append_in_filter(clauses, params, "CAST(site_id AS VARCHAR)", ctx.selected_sites)
 
         if ctx.smart_missing_serial:
-            clauses.append("(serial_number IS NULL OR TRIM(CAST(serial_number AS VARCHAR)) = '')")
+            clauses.append(duckdb_field_is_missing("serial_number"))
         if ctx.smart_duplicates:
             clauses.append(
                 f"""
                 TRIM(CAST(serial_number AS VARCHAR)) IN (
                     SELECT TRIM(CAST(serial_number AS VARCHAR))
                     FROM read_parquet('{_lake().equipment}')
-                    WHERE serial_number IS NOT NULL
-                      AND TRIM(CAST(serial_number AS VARCHAR)) <> ''
+                    WHERE NOT ({duckdb_field_is_missing("serial_number")})
                     GROUP BY TRIM(CAST(serial_number AS VARCHAR))
                     HAVING COUNT(*) > 1
                 )
@@ -452,22 +557,28 @@ class DataService:
             )
         if ctx.smart_critical_quality:
             clauses.append(
-                """
-                (
-                    serial_number IS NULL OR TRIM(CAST(serial_number AS VARCHAR)) = ''
-                    OR product_code IS NULL OR TRIM(CAST(product_code AS VARCHAR)) = ''
-                    OR product_name IS NULL OR TRIM(CAST(product_name AS VARCHAR)) = ''
-                )
-                """.strip()
+                f"({duckdb_field_is_missing('serial_number')} OR "
+                f"{duckdb_field_is_missing('product_code')} OR "
+                f"{duckdb_field_is_missing('product_name')})"
             )
         return clauses, params
 
     @staticmethod
-    def _normalize_pagination(page: int, page_size: int) -> tuple[int, int, int]:
+    def _normalize_pagination(page: int, page_size: int) -> tuple[int, int, int, bool]:
         safe_page = max(1, int(page))
-        safe_size = min(2000, max(50, int(page_size)))
+        if int(page_size) <= 0:
+            return safe_page, 0, 0, True
+        safe_size = int(page_size)
         offset = (safe_page - 1) * safe_size
-        return safe_page, safe_size, offset
+        return safe_page, safe_size, offset, False
+
+    @staticmethod
+    def _limit_clause(unlimited: bool) -> str:
+        return "" if unlimited else "LIMIT ? OFFSET ?"
+
+    @staticmethod
+    def _limit_params(unlimited: bool, size: int, offset: int) -> list[Any]:
+        return [] if unlimited else [size, offset]
 
     def get_dashboard(self, ctx: FilterContext) -> dict[str, Any]:
         effective_dates = sorted(ctx.effective_dates or ctx.selected_dates)
@@ -595,8 +706,18 @@ class DataService:
                 CAST(ip_address AS VARCHAR) AS ip_address,
                 CAST(sw_version AS VARCHAR) AS sw_version,
                 COALESCE(nb_cells, 0) AS nb_cells,
+                COALESCE(nb_cells_2g, 0) AS nb_cells_2g,
+                COALESCE(nb_cells_2g, 0) AS cells_2g,
+                COALESCE(nb_cells_3g, 0) AS nb_cells_3g,
+                COALESCE(nb_cells_3g, 0) AS cells_3g,
+                COALESCE(nb_cells_lte_4g, 0) AS nb_cells_lte_4g,
+                COALESCE(nb_cells_lte_4g, 0) AS cells_4g_lte,
+                COALESCE(nb_cells_lte_fdd, 0) AS nb_cells_lte_fdd,
                 COALESCE(nb_cells_lte_fdd, 0) AS cells_4g_fdd,
+                COALESCE(nb_cells_lte_tdd, 0) AS nb_cells_lte_tdd,
                 COALESCE(nb_cells_lte_tdd, 0) AS cells_4g_tdd,
+                COALESCE(nb_cells_5g, 0) AS nb_cells_5g,
+                COALESCE(nb_cells_5g, 0) AS cells_5g,
                 CAST(technologies AS VARCHAR) AS technologies,
                 CAST(source_file AS VARCHAR) AS source_file
             FROM read_parquet('{_lake().sites}')
@@ -605,7 +726,7 @@ class DataService:
             """,
             params,
         )
-        return df.to_dict(orient="records")
+        return self._serialize_site_rows(df)
 
     def get_inventory_page(self, ctx: FilterContext, object_types: list[str] | None = None) -> dict[str, Any]:
         clauses, params = self._equipment_filters(ctx)
@@ -656,7 +777,7 @@ class DataService:
         *,
         object_types: list[str] | None = None,
         page: int = 1,
-        page_size: int = 500,
+        page_size: int = 0,
         search: str = "",
     ) -> dict[str, Any]:
         clauses, params = self._equipment_filters(ctx)
@@ -720,7 +841,7 @@ class DataService:
             )
             rows_params.extend([like_term] * 8)
 
-        safe_page, safe_size, offset = self._normalize_pagination(page, page_size)
+        safe_page, safe_size, offset, unlimited = self._normalize_pagination(page, page_size)
         total_df = query(
             f"""
             SELECT COUNT(*) AS total_count
@@ -773,7 +894,6 @@ class DataService:
             WHERE {rows_where}
             GROUP BY CAST(object_type AS VARCHAR)
             ORDER BY total_equipment DESC, object_type
-            LIMIT 8
             """,
             rows_params,
         )
@@ -786,7 +906,6 @@ class DataService:
             WHERE {rows_where}
             GROUP BY CAST(site_id AS VARCHAR)
             ORDER BY total_equipment DESC, site_id
-            LIMIT 8
             """,
             rows_params,
         )
@@ -806,16 +925,16 @@ class DataService:
             FROM read_parquet('{_lake().equipment}')
             WHERE {rows_where}
             ORDER BY {self._object_order_case()}, site_id, id
-            LIMIT ? OFFSET ?
+            {self._limit_clause(unlimited)}
             """,
-            [*rows_params, safe_size, offset],
+            [*rows_params, *self._limit_params(unlimited, safe_size, offset)],
         )
         return {
             "object_types": object_types_df["object_type"].astype(str).tolist() if not object_types_df.empty else [],
             "rows": rows.to_dict(orient="records"),
             "total_count": total_count,
             "page": safe_page,
-            "page_size": safe_size,
+            "page_size": total_count if unlimited else safe_size,
             "summary": {
                 "total_equipment": total_equipment,
                 "unique_sites": unique_sites,
@@ -831,11 +950,35 @@ class DataService:
             },
         }
 
-    def get_sites_page_v2(self, ctx: FilterContext, *, page: int = 1, page_size: int = 500, search: str = "") -> dict[str, Any]:
+    @staticmethod
+    def _serialize_site_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
+        records = df.to_dict(orient="records")
+        int_keys = (
+            "nb_cells",
+            "nb_cells_2g",
+            "nb_cells_3g",
+            "nb_cells_lte_4g",
+            "nb_cells_lte_fdd",
+            "nb_cells_lte_tdd",
+            "nb_cells_5g",
+            "cells_2g",
+            "cells_3g",
+            "cells_4g_lte",
+            "cells_4g_fdd",
+            "cells_4g_tdd",
+            "cells_5g",
+        )
+        for row in records:
+            for key in int_keys:
+                if key in row and row[key] is not None:
+                    row[key] = int(row[key])
+        return records
+
+    def get_sites_page_v2(self, ctx: FilterContext, *, page: int = 1, page_size: int = 0, search: str = "") -> dict[str, Any]:
         where, params = self._sites_where(ctx, search=search)
         if not where:
             return {"rows": [], "total_count": 0, "page": 1, "page_size": page_size}
-        safe_page, safe_size, offset = self._normalize_pagination(page, page_size)
+        safe_page, safe_size, offset, unlimited = self._normalize_pagination(page, page_size)
         total_df = query(
             f"""
             SELECT COUNT(*) AS total_count
@@ -856,20 +999,33 @@ class DataService:
                 CAST(ip_address AS VARCHAR) AS ip_address,
                 CAST(sw_version AS VARCHAR) AS sw_version,
                 COALESCE(nb_cells, 0) AS nb_cells,
+                COALESCE(nb_cells_2g, 0) AS nb_cells_2g,
+                COALESCE(nb_cells_2g, 0) AS cells_2g,
+                COALESCE(nb_cells_3g, 0) AS nb_cells_3g,
+                COALESCE(nb_cells_3g, 0) AS cells_3g,
+                COALESCE(nb_cells_lte_4g, 0) AS nb_cells_lte_4g,
+                COALESCE(nb_cells_lte_4g, 0) AS cells_4g_lte,
+                COALESCE(nb_cells_lte_fdd, 0) AS nb_cells_lte_fdd,
+                COALESCE(nb_cells_lte_fdd, 0) AS cells_4g_fdd,
+                COALESCE(nb_cells_lte_tdd, 0) AS nb_cells_lte_tdd,
+                COALESCE(nb_cells_lte_tdd, 0) AS cells_4g_tdd,
+                COALESCE(nb_cells_5g, 0) AS nb_cells_5g,
+                COALESCE(nb_cells_5g, 0) AS cells_5g,
                 CAST(technologies AS VARCHAR) AS technologies,
                 CAST(source_file AS VARCHAR) AS source_file
             FROM read_parquet('{_lake().sites}')
             WHERE {where}
             ORDER BY snapshot_date DESC, site_id
-            LIMIT ? OFFSET ?
+            {self._limit_clause(unlimited)}
             """,
-            [*params, safe_size, offset],
+            [*params, *self._limit_params(unlimited, safe_size, offset)],
         )
+        serialized_rows = self._serialize_site_rows(rows)
         return {
-            "rows": rows.to_dict(orient="records"),
+            "rows": serialized_rows,
             "total_count": total_count,
             "page": safe_page,
-            "page_size": safe_size,
+            "page_size": total_count if unlimited else safe_size,
             "effective_dates": sorted(ctx.effective_dates or ctx.selected_dates),
         }
 
@@ -1496,7 +1652,7 @@ class DataService:
         *,
         object_types: list[str] | None = None,
         page: int = 1,
-        page_size: int = 500,
+        page_size: int = 0,
         search: str = "",
         unique_serial_only: bool = False,
     ) -> dict[str, Any]:
@@ -1534,7 +1690,7 @@ class DataService:
             )
             params.extend([like_term, like_term, like_term])
         where = " AND ".join(clauses) if clauses else "1=1"
-        safe_page, safe_size, offset = self._normalize_pagination(page, page_size)
+        safe_page, safe_size, offset, unlimited = self._normalize_pagination(page, page_size)
 
         if unique_serial_only:
             equipment_clauses, equipment_params = self._equipment_filters(ctx)
@@ -1567,8 +1723,7 @@ class DataService:
                       AND serial_number IS NOT NULL
                       AND TRIM(CAST(serial_number AS VARCHAR)) <> ''
                     GROUP BY TRIM(CAST(serial_number AS VARCHAR))
-                    HAVING COUNT(*) = 1
-                ) uniq
+                ) deduped
                 """,
                 equipment_params,
             )
@@ -1590,26 +1745,35 @@ class DataService:
                       AND serial_number IS NOT NULL
                       AND TRIM(CAST(serial_number AS VARCHAR)) <> ''
                 ),
-                unique_serials AS (
-                    SELECT serial_number
+                deduped AS (
+                    SELECT
+                        snapshot_date,
+                        site_id,
+                        object_type,
+                        serial_number,
+                        product_code,
+                        product_name,
+                        nb_equipment,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY serial_number
+                            ORDER BY snapshot_date DESC, site_id, object_type, product_code, product_name
+                        ) AS rn
                     FROM scoped
-                    GROUP BY serial_number
-                    HAVING COUNT(*) = 1
                 )
                 SELECT
-                    scoped.snapshot_date,
-                    scoped.site_id,
-                    scoped.object_type,
-                    scoped.serial_number,
-                    scoped.product_code,
-                    scoped.product_name,
-                    scoped.nb_equipment
-                FROM scoped
-                INNER JOIN unique_serials USING (serial_number)
-                ORDER BY scoped.snapshot_date DESC, {self._object_order_case()}, scoped.object_type, scoped.site_id, scoped.serial_number
-                LIMIT ? OFFSET ?
+                    snapshot_date,
+                    site_id,
+                    object_type,
+                    serial_number,
+                    product_code,
+                    product_name,
+                    nb_equipment
+                FROM deduped
+                WHERE rn = 1
+                ORDER BY snapshot_date DESC, {self._object_order_case()}, object_type, site_id, serial_number
+                {self._limit_clause(unlimited)}
                 """,
-                [*equipment_params, safe_size, offset],
+                [*equipment_params, *self._limit_params(unlimited, safe_size, offset)],
             )
 
             summary_df = query(
@@ -1625,21 +1789,24 @@ class DataService:
                       AND serial_number IS NOT NULL
                       AND TRIM(CAST(serial_number AS VARCHAR)) <> ''
                 ),
-                unique_rows AS (
-                    SELECT scoped.*
+                deduped AS (
+                    SELECT
+                        site_id,
+                        object_type,
+                        serial_number,
+                        nb_equipment,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY serial_number
+                            ORDER BY site_id, object_type
+                        ) AS rn
                     FROM scoped
-                    INNER JOIN (
-                        SELECT serial_number
-                        FROM scoped
-                        GROUP BY serial_number
-                        HAVING COUNT(*) = 1
-                    ) uniq USING (serial_number)
                 )
                 SELECT
                     COALESCE(SUM(nb_equipment), 0) AS total_assets,
                     COUNT(DISTINCT site_id) AS total_sites,
                     COUNT(DISTINCT object_type) AS total_object_types
-                FROM unique_rows
+                FROM deduped
+                WHERE rn = 1
                 """,
                 equipment_params,
             )
@@ -1662,7 +1829,7 @@ class DataService:
                 "rows": rows.to_dict(orient="records"),
                 "total_count": total_count,
                 "page": safe_page,
-                "page_size": safe_size,
+                "page_size": total_count if unlimited else safe_size,
                 "object_types": object_types_df["object_type"].astype(str).tolist() if not object_types_df.empty else [],
                 "summary": {
                     "total_assets": total_assets,
@@ -1731,23 +1898,27 @@ class DataService:
                     CAST(snapshot_date AS VARCHAR) AS snapshot_date,
                     CAST(site_id AS VARCHAR) AS site_id,
                     CAST(object_type AS VARCHAR) AS object_type,
-                    COUNT(
-                        CASE
-                            WHEN serial_number IS NOT NULL AND TRIM(CAST(serial_number AS VARCHAR)) <> '' THEN 1
-                        END
-                    ) AS serial_rows,
-                    COUNT(
-                        DISTINCT CASE
-                            WHEN serial_number IS NOT NULL AND TRIM(CAST(serial_number AS VARCHAR)) <> ''
-                            THEN TRIM(CAST(serial_number AS VARCHAR))
-                        END
-                    ) AS unique_serials
-                FROM read_parquet('{_lake().equipment}')
-                WHERE {equipment_where}
-                GROUP BY
-                    CAST(snapshot_date AS VARCHAR),
-                    CAST(site_id AS VARCHAR),
-                    CAST(object_type AS VARCHAR)
+                    SUM(serial_occurrences) AS serial_rows,
+                    COUNT(*) AS unique_serials,
+                    COUNT(CASE WHEN serial_occurrences > 1 THEN 1 END) AS duplicated_serials
+                FROM (
+                    SELECT
+                        CAST(snapshot_date AS VARCHAR) AS snapshot_date,
+                        CAST(site_id AS VARCHAR) AS site_id,
+                        CAST(object_type AS VARCHAR) AS object_type,
+                        TRIM(CAST(serial_number AS VARCHAR)) AS serial_number,
+                        COUNT(*) AS serial_occurrences
+                    FROM read_parquet('{_lake().equipment}')
+                    WHERE {equipment_where}
+                      AND serial_number IS NOT NULL
+                      AND TRIM(CAST(serial_number AS VARCHAR)) <> ''
+                    GROUP BY
+                        CAST(snapshot_date AS VARCHAR),
+                        CAST(site_id AS VARCHAR),
+                        CAST(object_type AS VARCHAR),
+                        TRIM(CAST(serial_number AS VARCHAR))
+                ) serial_counts
+                GROUP BY snapshot_date, site_id, object_type
             ),
             site_totals AS (
                 SELECT site_id, SUM(equipment_count) AS site_total_assets
@@ -1768,7 +1939,7 @@ class DataService:
                 object_total_assets,
                 sites_count,
                 COALESCE(serial_scope.unique_serials, 0) AS unique_serials,
-                GREATEST(COALESCE(serial_scope.serial_rows, 0) - COALESCE(serial_scope.unique_serials, 0), 0) AS duplicated_serials,
+                COALESCE(serial_scope.duplicated_serials, 0) AS duplicated_serials,
                 ROUND(COALESCE(serial_scope.unique_serials, 0) * 100.0 / NULLIF(serial_scope.serial_rows, 0), 1) AS unique_serial_rate,
                 ROUND(equipment_count * 100.0 / NULLIF(site_total_assets, 0), 1) AS site_asset_share,
                 ROUND(equipment_count * 100.0 / NULLIF(object_total_assets, 0), 1) AS object_asset_share
@@ -1777,9 +1948,9 @@ class DataService:
             LEFT JOIN site_totals USING (site_id)
             LEFT JOIN object_totals USING (object_type)
             ORDER BY snapshot_date DESC, site_total_assets DESC, site_id, {self._object_order_case()}, object_type
-            LIMIT ? OFFSET ?
+            {self._limit_clause(unlimited)}
             """,
-            [*params, *equipment_params, safe_size, offset],
+            [*params, *equipment_params, *self._limit_params(unlimited, safe_size, offset)],
         )
 
         object_types_df = query(
@@ -1796,7 +1967,7 @@ class DataService:
             "rows": rows.to_dict(orient="records"),
             "total_count": total_count,
             "page": safe_page,
-            "page_size": safe_size,
+            "page_size": total_count if unlimited else safe_size,
             "object_types": object_types_df["object_type"].astype(str).tolist() if not object_types_df.empty else [],
             "summary": {
                 "total_assets": total_assets,
@@ -1812,9 +1983,10 @@ class DataService:
         *,
         object_types: list[str] | None = None,
         page: int = 1,
-        page_size: int = 500,
+        page_size: int = 0,
         search: str = "",
         unique_serial_only: bool = True,
+        pivot_product_code: bool = False,
     ) -> dict[str, Any]:
         clauses, params = self._equipment_filters(ctx)
         if object_types:
@@ -1834,7 +2006,47 @@ class DataService:
             )
             params.extend([like_term, like_term, like_term, like_term])
         where = " AND ".join(clauses) if clauses else "1=1"
-        safe_page, safe_size, offset = self._normalize_pagination(page, page_size)
+        safe_page, safe_size, offset, unlimited = self._normalize_pagination(page, page_size)
+
+        if pivot_product_code:
+            scoped_where = f"{where} AND serial_number IS NOT NULL AND TRIM(CAST(serial_number AS VARCHAR)) <> ''"
+            total_df = query(
+                f"""
+                SELECT COUNT(*) AS total_count
+                FROM (
+                    SELECT 1
+                    FROM read_parquet('{_lake().equipment}')
+                    WHERE {scoped_where}
+                    GROUP BY CAST(product_code AS VARCHAR)
+                ) grouped
+                """,
+                params,
+            )
+            total_count = int(total_df.iloc[0]["total_count"]) if not total_df.empty else 0
+
+            rows = query(
+                f"""
+                SELECT
+                    CAST(product_code AS VARCHAR) AS product_code,
+                    CAST(MAX(product_name) AS VARCHAR) AS product_name,
+                    COUNT(*) AS product_code_count
+                FROM read_parquet('{_lake().equipment}')
+                WHERE {scoped_where}
+                GROUP BY CAST(product_code AS VARCHAR)
+                ORDER BY product_code_count DESC, product_code
+                {self._limit_clause(unlimited)}
+                """,
+                [*params, *self._limit_params(unlimited, safe_size, offset)],
+            )
+
+            return {
+                "rows": rows.to_dict(orient="records"),
+                "total_count": total_count,
+                "page": safe_page,
+                "page_size": total_count if unlimited else safe_size,
+                "unique_serial_only": unique_serial_only,
+                "pivot_product_code": True,
+            }
 
         if unique_serial_only:
             scoped_where = f"{where} AND serial_number IS NOT NULL AND TRIM(CAST(serial_number AS VARCHAR)) <> ''"
@@ -1851,18 +2063,15 @@ class DataService:
                             TRIM(CAST(serial_number AS VARCHAR)) AS serial_number
                         FROM read_parquet('{_lake().equipment}')
                         WHERE {scoped_where}
-                    ) scoped
-                    INNER JOIN (
-                        SELECT TRIM(CAST(serial_number AS VARCHAR)) AS serial_number
-                        FROM read_parquet('{_lake().equipment}')
-                        WHERE {scoped_where}
-                        GROUP BY TRIM(CAST(serial_number AS VARCHAR))
-                        HAVING COUNT(*) = 1
-                    ) unique_serials USING (serial_number)
+                        QUALIFY ROW_NUMBER() OVER (
+                            PARTITION BY TRIM(CAST(serial_number AS VARCHAR))
+                            ORDER BY object_type, product_name, product_code
+                        ) = 1
+                    ) deduped
                     GROUP BY object_type, product_name, product_code
                 ) grouped
                 """,
-                [*params, *params],
+                params,
             )
             total_count = int(total_df.iloc[0]["total_count"]) if not total_df.empty else 0
 
@@ -1877,24 +2086,29 @@ class DataService:
                     FROM read_parquet('{_lake().equipment}')
                     WHERE {scoped_where}
                 ),
-                unique_serials AS (
-                    SELECT serial_number
+                deduped AS (
+                    SELECT
+                        object_type,
+                        product_name,
+                        product_code,
+                        serial_number
                     FROM scoped
-                    GROUP BY serial_number
-                    HAVING COUNT(*) = 1
+                    QUALIFY ROW_NUMBER() OVER (
+                        PARTITION BY serial_number
+                        ORDER BY object_type, product_name, product_code
+                    ) = 1
                 )
                 SELECT
-                    scoped.object_type,
-                    scoped.product_name,
-                    scoped.product_code,
+                    object_type,
+                    product_name,
+                    product_code,
                     COUNT(*) AS product_code_count
-                FROM scoped
-                INNER JOIN unique_serials USING (serial_number)
-                GROUP BY scoped.object_type, scoped.product_name, scoped.product_code
-                ORDER BY product_code_count DESC, scoped.object_type, scoped.product_name, scoped.product_code
-                LIMIT ? OFFSET ?
+                FROM deduped
+                GROUP BY object_type, product_name, product_code
+                ORDER BY product_code_count DESC, object_type, product_name, product_code
+                {self._limit_clause(unlimited)}
                 """,
-                [*params, safe_size, offset],
+                [*params, *self._limit_params(unlimited, safe_size, offset)],
             )
         else:
             total_df = query(
@@ -1928,17 +2142,18 @@ class DataService:
                     CAST(product_name AS VARCHAR),
                     CAST(product_code AS VARCHAR)
                 ORDER BY product_code_count DESC, object_type, product_name, product_code
-                LIMIT ? OFFSET ?
+                {self._limit_clause(unlimited)}
                 """,
-                [*params, safe_size, offset],
+                [*params, *self._limit_params(unlimited, safe_size, offset)],
             )
 
         return {
             "rows": rows.to_dict(orient="records"),
             "total_count": total_count,
             "page": safe_page,
-            "page_size": safe_size,
+            "page_size": total_count if unlimited else safe_size,
             "unique_serial_only": unique_serial_only,
+            "pivot_product_code": False,
         }
 
     def get_global_counters_page(self, ctx: FilterContext) -> dict[str, Any]:
@@ -2015,7 +2230,7 @@ class DataService:
 
     def get_delta_comparison(self, ctx: FilterContext, date_1: str, date_2: str) -> dict[str, Any]:
         if not date_1 or not date_2 or date_1 == date_2:
-            return {"comparison": [], "details": []}
+            return {"comparison": [], "details": [], "equipment_changes": []}
 
         base_site_clauses: list[str] = []
         base_site_params: list[Any] = []
@@ -2025,20 +2240,47 @@ class DataService:
 
         site_metrics = query(
             f"""
+            WITH site_rows AS (
+                SELECT
+                    CAST(snapshot_date AS VARCHAR) AS snapshot_date,
+                    CAST(site_id AS VARCHAR) AS site_id,
+                    LOWER(CAST(site_state AS VARCHAR)) AS site_state,
+                    COALESCE(nb_cells_2g, 0) AS nb_cells_2g,
+                    COALESCE(nb_cells_3g, 0) AS nb_cells_3g,
+                    COALESCE(nb_cells_lte_4g, 0) AS nb_cells_lte_4g,
+                    COALESCE(nb_cells_lte_fdd, 0) AS nb_cells_lte_fdd,
+                    COALESCE(nb_cells_lte_tdd, 0) AS nb_cells_lte_tdd,
+                    COALESCE(nb_cells_5g, 0) AS nb_cells_5g
+                FROM read_parquet('{_lake().sites}')
+                WHERE {base_site_where}
+                  AND CAST(snapshot_date AS VARCHAR) IN (?, ?)
+            ),
+            site_dedup AS (
+                SELECT
+                    snapshot_date,
+                    site_id,
+                    MAX(site_state) AS site_state,
+                    MAX(nb_cells_2g) AS nb_cells_2g,
+                    MAX(nb_cells_3g) AS nb_cells_3g,
+                    MAX(nb_cells_lte_4g) AS nb_cells_lte_4g,
+                    MAX(nb_cells_lte_fdd) AS nb_cells_lte_fdd,
+                    MAX(nb_cells_lte_tdd) AS nb_cells_lte_tdd,
+                    MAX(nb_cells_5g) AS nb_cells_5g
+                FROM site_rows
+                GROUP BY snapshot_date, site_id
+            )
             SELECT
-                CAST(snapshot_date AS VARCHAR) AS snapshot_date,
-                COUNT(DISTINCT CAST(site_id AS VARCHAR)) AS total_sites,
-                COALESCE(SUM(CASE WHEN LOWER(CAST(site_state AS VARCHAR)) = 'active' THEN 1 ELSE 0 END), 0) AS active_sites,
-                COALESCE(SUM(CASE WHEN LOWER(CAST(site_state AS VARCHAR)) = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked_sites,
+                snapshot_date,
+                COUNT(DISTINCT site_id) AS total_sites,
+                COUNT(DISTINCT CASE WHEN site_state = 'active' THEN site_id END) AS active_sites,
+                COUNT(DISTINCT CASE WHEN site_state = 'blocked' THEN site_id END) AS blocked_sites,
                 COALESCE(SUM(nb_cells_2g), 0) AS cells_2g,
                 COALESCE(SUM(nb_cells_3g), 0) AS cells_3g,
                 COALESCE(SUM(nb_cells_lte_4g), 0) AS cells_4g,
                 COALESCE(SUM(nb_cells_lte_fdd), 0) AS cells_4g_fdd,
                 COALESCE(SUM(nb_cells_lte_tdd), 0) AS cells_4g_tdd,
                 COALESCE(SUM(nb_cells_5g), 0) AS cells_5g
-            FROM read_parquet('{_lake().sites}')
-            WHERE {base_site_where}
-              AND CAST(snapshot_date AS VARCHAR) IN (?, ?)
+            FROM site_dedup
             GROUP BY snapshot_date
             """,
             [*base_site_params, date_1, date_2],
@@ -2088,6 +2330,7 @@ class DataService:
                 END), 0) AS missing_serials
             FROM read_parquet('{_lake().equipment}')
             WHERE {eq_where}
+              AND UPPER(CAST(object_type AS VARCHAR)) IN ({_FINAL_EQUIPMENT_SQL})
             GROUP BY snapshot_date
             """,
             eq_params,
@@ -2127,6 +2370,72 @@ class DataService:
         )
         added_sites = int((details["change_type"] == "ADDED").sum()) if not details.empty else 0
         removed_sites = int((details["change_type"] == "REMOVED").sum()) if not details.empty else 0
+
+        equipment_changes = query(
+            f"""
+            WITH scoped AS (
+                SELECT
+                    CAST(snapshot_date AS VARCHAR) AS snapshot_date,
+                    CAST(site_id AS VARCHAR) AS site_id,
+                    CAST(object_type AS VARCHAR) AS object_type,
+                    CAST(id AS VARCHAR) AS id,
+                    TRIM(CAST(serial_number AS VARCHAR)) AS serial_number,
+                    TRIM(CAST(product_code AS VARCHAR)) AS product_code,
+                    TRIM(CAST(product_name AS VARCHAR)) AS product_name,
+                    COALESCE(nb_equipment, 1) AS nb_equipment
+                FROM read_parquet('{_lake().equipment}')
+                WHERE {eq_where}
+                  AND UPPER(CAST(object_type AS VARCHAR)) IN ({_FINAL_EQUIPMENT_SQL})
+            ),
+            e1 AS (
+                SELECT * FROM scoped WHERE snapshot_date = ?
+            ),
+            e2 AS (
+                SELECT * FROM scoped WHERE snapshot_date = ?
+            ),
+            changes AS (
+                SELECT
+                    'ADDED' AS change_type,
+                    e2.site_id,
+                    e2.object_type,
+                    e2.id,
+                    e2.serial_number,
+                    e2.product_code,
+                    e2.product_name,
+                    e2.nb_equipment,
+                    ? AS date_1,
+                    ? AS date_2
+                FROM e2
+                LEFT JOIN e1
+                  ON e1.site_id = e2.site_id
+                 AND e1.object_type = e2.object_type
+                 AND e1.id = e2.id
+                WHERE e1.id IS NULL
+                UNION ALL
+                SELECT
+                    'REMOVED' AS change_type,
+                    e1.site_id,
+                    e1.object_type,
+                    e1.id,
+                    e1.serial_number,
+                    e1.product_code,
+                    e1.product_name,
+                    e1.nb_equipment,
+                    ? AS date_1,
+                    ? AS date_2
+                FROM e1
+                LEFT JOIN e2
+                  ON e1.site_id = e2.site_id
+                 AND e1.object_type = e2.object_type
+                 AND e1.id = e2.id
+                WHERE e2.id IS NULL
+            )
+            SELECT *
+            FROM changes
+            ORDER BY change_type, site_id, {self._object_order_case("changes.object_type")}, changes.object_type, changes.id
+            """,
+            [*eq_params, date_1, date_2, date_1, date_2, date_1, date_2],
+        )
 
         metrics = [
             ("total_sites", "sites", int(site_1.get("total_sites", 0)), int(site_2.get("total_sites", 0)), False),
@@ -2171,7 +2480,11 @@ class DataService:
                     "status": status,
                 }
             )
-        return {"comparison": comparison, "details": details.to_dict(orient="records")}
+        return {
+            "comparison": comparison,
+            "details": details.to_dict(orient="records"),
+            "equipment_changes": equipment_changes.to_dict(orient="records"),
+        }
 
     def get_quality_page(self, ctx: FilterContext) -> dict[str, Any]:
         clauses, params = self._equipment_filters(ctx)
@@ -2198,17 +2511,17 @@ class DataService:
                     serial_number,
                     COUNT(*) AS serial_occurrences
                 FROM base
-                WHERE serial_number IS NOT NULL AND serial_number <> ''
+                WHERE NOT ({duckdb_field_is_missing("serial_number")})
                 GROUP BY site_id, object_type, serial_number
             )
             SELECT
                 base.site_id AS site_id,
                 base.object_type AS object_type,
                 COUNT(*) AS records,
-                SUM(CASE WHEN base.serial_number IS NULL OR base.serial_number = '' THEN 1 ELSE 0 END) AS missing_serial,
-                SUM(CASE WHEN base.product_code IS NULL OR base.product_code = '' THEN 1 ELSE 0 END) AS missing_product_code,
-                SUM(CASE WHEN base.product_name IS NULL OR base.product_name = '' THEN 1 ELSE 0 END) AS missing_product_name,
-                COUNT(DISTINCT CASE WHEN base.serial_number IS NOT NULL AND base.serial_number <> '' THEN base.serial_number END) AS unique_serials,
+                SUM(CASE WHEN {duckdb_field_is_missing("base.serial_number")} THEN 1 ELSE 0 END) AS missing_serial,
+                SUM(CASE WHEN {duckdb_field_is_missing("base.product_code")} THEN 1 ELSE 0 END) AS missing_product_code,
+                SUM(CASE WHEN {duckdb_field_is_missing("base.product_name")} THEN 1 ELSE 0 END) AS missing_product_name,
+                COUNT(DISTINCT CASE WHEN NOT ({duckdb_field_is_missing("base.serial_number")}) THEN base.serial_number END) AS unique_serials,
                 SUM(CASE WHEN serial_stats.serial_occurrences > 1 THEN 1 ELSE 0 END) AS duplicated_records
             FROM base
             LEFT JOIN serial_stats
@@ -3205,6 +3518,9 @@ class DataService:
                 "sections": [],
                 "trend": [],
                 "top_risks": [],
+                "decisions": [],
+                "critical_findings": [],
+                "risk_index": 0,
             }
 
         earliest, latest = dates[0], dates[-1]
@@ -3398,6 +3714,101 @@ class DataService:
             f"5G expansion shows a {cells_5g_delta:+d} cell change."
         )
 
+        decisions: list[dict[str, Any]] = []
+
+        def _decision(priority: str, category: str, fr: str, en: str) -> None:
+            decisions.append({"priority": priority, "category": category, "fr": fr, "en": en})
+
+        if critical > 0:
+            _decision(
+                "P1",
+                "risks",
+                f"Escalader immédiatement {critical} alerte(s) critique(s) avant exploitation opérationnelle du snapshot.",
+                f"Immediately escalate {critical} critical alert(s) before operational use of the snapshot.",
+            )
+        if high > 0:
+            _decision(
+                "P2",
+                "risks",
+                f"Planifier une revue NOC sous 48 h pour {high} alerte(s) de sévérité élevée.",
+                f"Schedule a NOC review within 48 h for {high} high-severity alert(s).",
+            )
+        if blocked_sites > 0:
+            _decision(
+                "P2",
+                "operations",
+                f"Auditer {blocked_sites} site(s) bloqué(s) et valider l'impact sur la couverture.",
+                f"Audit {blocked_sites} blocked site(s) and validate coverage impact.",
+            )
+        if abs(equipment_delta) > max(50, int(total_sites * 0.05)):
+            _decision(
+                "P2",
+                "inventory",
+                f"Contrôler le delta équipements ({equipment_delta:+d}) vs baseline attendue.",
+                f"Verify equipment delta ({equipment_delta:+d}) against expected baseline.",
+            )
+        if added_sites > 0 or removed_sites > 0:
+            _decision(
+                "P3",
+                "evolution",
+                f"Valider avec le planning réseau {added_sites} activation(s) et {removed_sites} résiliation(s) détectées.",
+                f"Validate with network planning: {added_sites} activation(s) and {removed_sites} decommission(s) detected.",
+            )
+        if anomalies["summary"]["total"] == 0:
+            _decision(
+                "P3",
+                "quality",
+                "Aucune anomalie majeure — snapshot prêt pour analytics et reporting exécutif.",
+                "No major anomaly — snapshot ready for analytics and executive reporting.",
+            )
+        if not decisions:
+            _decision(
+                "P3",
+                "operations",
+                "Poursuivre la surveillance standard et comparer avec le snapshot précédent.",
+                "Continue standard monitoring and compare with the previous snapshot.",
+            )
+
+        critical_findings: list[dict[str, Any]] = []
+        if critical > 0:
+            critical_findings.append(
+                {
+                    "severity": "critical",
+                    "fr": f"{critical} alerte(s) critique(s) actives sur le snapshot {latest}.",
+                    "en": f"{critical} critical alert(s) active on snapshot {latest}.",
+                }
+            )
+        if blocked_sites > 0:
+            critical_findings.append(
+                {
+                    "severity": "high",
+                    "fr": f"{blocked_sites} site(s) en état bloqué — risque de couverture.",
+                    "en": f"{blocked_sites} site(s) in blocked state — coverage risk.",
+                }
+            )
+        for row in top_risks[:5]:
+            level = str(row.get("level") or "medium").lower()
+            critical_findings.append(
+                {
+                    "severity": level,
+                    "fr": f"Site {row.get('site_id')} — {row.get('anomalies')} anomalie(s) ({row.get('types')}).",
+                    "en": f"Site {row.get('site_id')} — {row.get('anomalies')} anomaly(ies) ({row.get('types')}).",
+                }
+            )
+        if cells_5g_delta < 0:
+            critical_findings.append(
+                {
+                    "severity": "medium",
+                    "fr": f"Régression 5G détectée ({cells_5g_delta:+d} cellules) sur la période.",
+                    "en": f"5G regression detected ({cells_5g_delta:+d} cells) over the period.",
+                }
+            )
+
+        risk_index = min(
+            100,
+            critical * 18 + high * 10 + blocked_sites * 4 + min(25, anomalies["summary"]["total"]),
+        )
+
         return {
             "generated_at": generated_at,
             "period": {"start": earliest, "end": latest, "snapshots": len(dates)},
@@ -3406,6 +3817,9 @@ class DataService:
             "sections": sections,
             "trend": trend,
             "top_risks": top_risks,
+            "decisions": decisions,
+            "critical_findings": critical_findings,
+            "risk_index": risk_index,
         }
 
     @staticmethod

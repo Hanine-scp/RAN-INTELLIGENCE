@@ -1,7 +1,11 @@
 import { getAccessToken, getRefreshToken, saveSession, type AuthSession, type AuthUser } from "@/lib/auth";
+import { fetchWithRetry } from "@/lib/fetch-client";
 import type { ApiEnvelope, FilterPayload, PaginatedQuery } from "@/lib/types";
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8010").replace(/\/+$/, "");
+const ACCESS_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
+
+let refreshInFlight: Promise<AuthSession | null> | null = null;
 
 function toErrorMessage(path: string, error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -47,99 +51,103 @@ async function parseApiError(response: Response, path: string): Promise<never> {
   throw new Error(`API request failed: ${path} (${response.status})${detail}`);
 }
 
-async function postJson<T>(path: string, payload: unknown, auth = true): Promise<T> {
+export async function refreshAuthSession(): Promise<AuthSession | null> {
+  const refresh = getRefreshToken();
+  if (!refresh) return null;
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const envelope = (await response.json()) as ApiEnvelope<AuthSession>;
+    saveSession(envelope.data);
+    return envelope.data;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshSessionDeduped(): Promise<AuthSession | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshAuthSession().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+async function fetchApi(path: string, init: RequestInit = {}, auth = true): Promise<Response> {
+  const buildInit = (useAuth: boolean): RequestInit => {
+    const headers = new Headers(init.headers);
+    if (useAuth) {
+      const token = getAccessToken();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    }
+    if (init.body != null && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    return { ...init, headers, cache: "no-store" };
+  };
+
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method: "POST",
-      headers: auth ? authHeaders() : { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      cache: "no-store",
+    response = await fetchWithRetry(`${API_BASE_URL}${path}`, buildInit(auth), {
+      requestId: crypto.randomUUID(),
     });
   } catch (error) {
     throw new Error(toErrorMessage(path, error));
   }
 
+  if (auth && response.status === 401 && getRefreshToken()) {
+    const session = await refreshSessionDeduped();
+    if (session) {
+      try {
+        response = await fetchWithRetry(`${API_BASE_URL}${path}`, buildInit(true), {
+          requestId: crypto.randomUUID(),
+        });
+      } catch (error) {
+        throw new Error(toErrorMessage(path, error));
+      }
+    }
+  }
+
+  return response;
+}
+
+async function readJsonEnvelope<T>(response: Response, path: string): Promise<T> {
   if (!response.ok) {
     await parseApiError(response, path);
   }
-
   const envelope = (await response.json()) as ApiEnvelope<T>;
   return envelope.data;
+}
+
+async function postJson<T>(path: string, payload: unknown, auth = true): Promise<T> {
+  const response = await fetchApi(path, { method: "POST", body: JSON.stringify(payload) }, auth);
+  return readJsonEnvelope<T>(response, path);
 }
 
 async function getJson<T>(path: string, auth = true): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method: "GET",
-      headers: auth ? authHeaders(false) : undefined,
-      cache: "no-store",
-    });
-  } catch (error) {
-    throw new Error(toErrorMessage(path, error));
-  }
-  if (!response.ok) {
-    await parseApiError(response, path);
-  }
-  const envelope = (await response.json()) as ApiEnvelope<T>;
-  return envelope.data;
+  const response = await fetchApi(path, { method: "GET" }, auth);
+  return readJsonEnvelope<T>(response, path);
 }
 
 async function putJson<T>(path: string, payload: unknown): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method: "PUT",
-      headers: authHeaders(),
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
-  } catch (error) {
-    throw new Error(toErrorMessage(path, error));
-  }
-  if (!response.ok) {
-    await parseApiError(response, path);
-  }
-  const envelope = (await response.json()) as ApiEnvelope<T>;
-  return envelope.data;
+  const response = await fetchApi(path, { method: "PUT", body: JSON.stringify(payload) });
+  return readJsonEnvelope<T>(response, path);
 }
 
 async function deleteJson<T>(path: string): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method: "DELETE",
-      headers: authHeaders(false),
-      cache: "no-store",
-    });
-  } catch (error) {
-    throw new Error(toErrorMessage(path, error));
-  }
-  if (!response.ok) {
-    await parseApiError(response, path);
-  }
-  const envelope = (await response.json()) as ApiEnvelope<T>;
-  return envelope.data;
+  const response = await fetchApi(path, { method: "DELETE" });
+  return readJsonEnvelope<T>(response, path);
 }
 
 async function patchJson<T>(path: string, payload: unknown): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method: "PATCH",
-      headers: authHeaders(),
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
-  } catch (error) {
-    throw new Error(toErrorMessage(path, error));
-  }
-  if (!response.ok) {
-    await parseApiError(response, path);
-  }
-  const envelope = (await response.json()) as ApiEnvelope<T>;
-  return envelope.data;
+  const response = await fetchApi(path, { method: "PATCH", body: JSON.stringify(payload) });
+  return readJsonEnvelope<T>(response, path);
 }
 
 export function getFilterOptions(payload: FilterPayload) {
@@ -149,7 +157,17 @@ export function getFilterOptions(payload: FilterPayload) {
     site_options: { snapshot_date: string; source_file: string; site_id: string; site_name: string }[];
     total_sites: number;
     total_xml: number;
+    lake_ready?: boolean;
+    processed_dates?: string[];
+    xml_snapshots?: { snapshot_date: string; folder_name: string; xml_count: number; processed_in_lake: boolean }[];
   }>("/filters/options", payload);
+}
+
+export async function processSnapshots(snapshot_dates: string[]) {
+  return postJson<{
+    processed: { snapshot_date: string; xml_count: number; processing_seconds: number }[];
+    errors: { snapshot_date: string; error: string }[];
+  }>("/snapshots/process", { snapshot_dates });
 }
 
 export function getDashboard(payload: FilterPayload) {
@@ -163,6 +181,16 @@ export function getDashboard(payload: FilterPayload) {
 
 export function getSites(payload: FilterPayload) {
   return postJson<Record<string, unknown>[]>("/sites", payload);
+}
+
+export function getSitesV2(payload: FilterPayload, query: PaginatedQuery) {
+  return postJson<{
+    rows: Record<string, unknown>[];
+    total_count: number;
+    page: number;
+    page_size: number;
+    effective_dates: string[];
+  }>("/v2/sites", { ...payload, ...query });
 }
 
 export function getInventory(payload: FilterPayload, object_types: string[]) {
@@ -196,6 +224,27 @@ export function getDelta() {
   }>("/delta", {});
 }
 
+export function getGuardianOverview(payload: FilterPayload) {
+  return postJson<Record<string, unknown>>("/guardian/overview", payload);
+}
+
+export function getGuardianChanges(payload: FilterPayload, compare_date_1: string, compare_date_2: string) {
+  return postJson<{
+    date_from: string;
+    date_to: string;
+    summary: Record<string, number>;
+    events: Record<string, unknown>[];
+  }>("/guardian/changes", { ...payload, compare_date_1, compare_date_2 });
+}
+
+export function getGuardianAnomalies(payload: FilterPayload) {
+  return postJson<{ snapshot_date: string; count: number; rows: Record<string, unknown>[] }>("/guardian/anomalies", payload);
+}
+
+export function getGuardianRisks(payload: FilterPayload) {
+  return postJson<{ snapshot_date: string; count: number; rows: Record<string, unknown>[] }>("/guardian/risks", payload);
+}
+
 export function getDeltaCompare(
   payload: FilterPayload,
   compare_date_1: string,
@@ -204,6 +253,7 @@ export function getDeltaCompare(
   return postJson<{
     comparison: Record<string, unknown>[];
     details: Record<string, unknown>[];
+    equipment_changes: Record<string, unknown>[];
   }>("/delta/compare", { ...payload, compare_date_1, compare_date_2 });
 }
 
@@ -249,7 +299,7 @@ export function getAssetDistributionV2(payload: FilterPayload, query: PaginatedQ
 
 export function getAssetProductCodesV2(
   payload: FilterPayload,
-  query: PaginatedQuery & { unique_serial_only?: boolean },
+  query: PaginatedQuery & { unique_serial_only?: boolean; pivot_product_code?: boolean },
   object_types: string[] = [],
 ) {
   return postJson<{
@@ -258,7 +308,14 @@ export function getAssetProductCodesV2(
     page: number;
     page_size: number;
     unique_serial_only: boolean;
-  }>("/v2/asset-product-codes", { ...payload, ...query, object_types, unique_serial_only: query.unique_serial_only ?? true });
+    pivot_product_code?: boolean;
+  }>("/v2/asset-product-codes", {
+    ...payload,
+    ...query,
+    object_types,
+    unique_serial_only: query.unique_serial_only ?? true,
+    pivot_product_code: query.pivot_product_code ?? false,
+  });
 }
 
 export function getGlobalCounters(payload: FilterPayload) {
@@ -326,6 +383,18 @@ export function askAssistant(question: string) {
   }>("/assistant", { question });
 }
 
+export type WebSearchMeta = {
+  status?: string;
+  original_query?: string;
+  search_query?: string;
+  corrected_query?: string | null;
+  abstract?: string;
+  provider?: string;
+  source_count?: number;
+  searched_at?: string;
+  results?: Array<{ title?: string; url?: string; snippet?: string }>;
+};
+
 export type AssistantInsightResponse = {
   message: string;
   intent: string;
@@ -333,6 +402,8 @@ export type AssistantInsightResponse = {
   rows: Record<string, unknown>[];
   details?: Record<string, unknown>[];
   sources?: Record<string, unknown>[];
+  web_search_enabled?: boolean;
+  web_search_meta?: WebSearchMeta | null;
   suggested_questions?: string[];
   sql_guardrails?: Record<string, unknown>;
   file_reports?: Record<string, unknown>[];
@@ -352,10 +423,61 @@ export type AssistantEngineStatus = {
   claude?: { enabled: boolean; model: string | null; role?: string };
   rag?: { engine: string; procedures: string };
   timeseries?: { engine: string; metrics: string[] };
+  web_search?: {
+    mode?: string;
+    api_configured?: boolean;
+    active_api_provider?: string | null;
+    providers?: Record<string, boolean>;
+    fallback_chain?: string[];
+  };
+  compliance?: {
+    llm?: { provider?: string; integration?: string; model?: string | null; note?: string };
+    interface?: { product?: string; owner?: string; note?: string };
+    web_research?: { integration?: string; note?: string };
+  };
 };
 
 export function getAssistantEngineStatus() {
   return getJson<AssistantEngineStatus>("/assistant/status");
+}
+
+export type GuardianSearchResult = {
+  type: string;
+  title: string;
+  description: string;
+  href?: string;
+  url?: string;
+  meta?: Record<string, unknown>;
+};
+
+export type PlatformSearchResponse = {
+  query: string;
+  expanded_terms: string[];
+  results: GuardianSearchResult[];
+  status: string;
+};
+
+export type WebSearchApiResponse = {
+  results: Array<{ title?: string; snippet?: string; url?: string }>;
+  corrected_query?: string | null;
+  original_query?: string;
+  provider?: string;
+  status?: string;
+  abstract?: string;
+  source_count?: number;
+};
+
+export function searchPlatform(payload: FilterPayload, query: string) {
+  return postJson<PlatformSearchResponse>("/search/platform", { ...payload, query });
+}
+
+export function searchWeb(query: string, language: string, maxResults = 8) {
+  const params = new URLSearchParams({
+    q: query,
+    language,
+    max_results: String(maxResults),
+  });
+  return getJson<WebSearchApiResponse>(`/search/web?${params.toString()}`);
 }
 
 export type SiteKpiTimeseries = {
@@ -499,6 +621,19 @@ export type AiReportSection = {
   lines: { fr: string[]; en: string[] };
 };
 
+export type AiReportDecision = {
+  priority: string;
+  category: string;
+  fr: string;
+  en: string;
+};
+
+export type AiReportFinding = {
+  severity: string;
+  fr: string;
+  en: string;
+};
+
 export type AiReport = {
   generated_at: string;
   period: { start: string; end: string; snapshots: number };
@@ -507,6 +642,9 @@ export type AiReport = {
   sections: AiReportSection[];
   trend: Record<string, unknown>[];
   top_risks: Record<string, unknown>[];
+  decisions?: AiReportDecision[];
+  critical_findings?: AiReportFinding[];
+  risk_index?: number;
 };
 
 export function getAiReport(payload: FilterPayload) {
@@ -545,6 +683,14 @@ export function getOperationalSummary(payload: FilterPayload) {
 
 export function getQueryMetrics() {
   return getJson<Record<string, unknown>>("/ops/query-metrics");
+}
+
+export function getHttpMetrics() {
+  return getJson<Record<string, unknown>>("/ops/http-metrics");
+}
+
+export function getCacheStats() {
+  return getJson<Record<string, unknown>>("/ops/cache-stats");
 }
 
 export function getTrustAnchors() {
@@ -712,6 +858,59 @@ export function resendProvisionOtp(userId: number) {
   }>(`/auth/users/${userId}/resend-provision-otp`, {});
 }
 
+export function registerAccount(payload: { email: string; password: string; full_name: string }) {
+  return postJson<{
+    user_id: number;
+    email: string;
+    message: string;
+    email_sent: boolean;
+    verify_url?: string;
+    dev_verify_token?: string;
+  }>("/auth/register", payload, false);
+}
+
+export function loginAuth(payload: { email: string; password: string }) {
+  return postJson<AuthSession>("/auth/login", payload, false);
+}
+
+export function forgotPassword(payload: { email: string; channel?: "email" | "sms"; recovery_email?: string }) {
+  return postJson<{
+    message: string;
+    email_sent: boolean;
+    sms_sent?: boolean;
+    reset_url?: string;
+    dev_reset_token?: string;
+    dev_sms_code?: string;
+  }>("/auth/forgot-password", payload, false);
+}
+
+export function resetPassword(payload: {
+  token?: string;
+  new_password: string;
+  email?: string;
+  sms_code?: string;
+}) {
+  return postJson<{ message: string }>("/auth/reset-password", payload, false);
+}
+
+export function verifyEmailToken(token: string) {
+  return getJson<{
+    message: string;
+    already_verified: boolean;
+    user: AuthUser;
+  }>(`/auth/verify-email?token=${encodeURIComponent(token)}`, false);
+}
+
+export function resendVerificationEmail(payload: { email: string }) {
+  return postJson<{
+    message: string;
+    email_sent: boolean;
+    already_verified?: boolean;
+    verify_url?: string;
+    dev_verify_token?: string;
+  }>("/auth/resend-verification", payload, false);
+}
+
 export function activateUserAccount(payload: { email: string; email_code: string; phone_code: string }) {
   return postJson<{ user: AuthUser; message: string }>("/auth/activate", payload, false);
 }
@@ -756,6 +955,8 @@ export function getNotificationsStatus() {
   return getJson<{ enabled: boolean; email_ready: boolean; sms_ready: boolean }>("/auth/notifications/status", false);
 }
 
+export { getBootstrapStatus, bootstrapAdminSignup, resendBootstrapAdminOtp, verifyBootstrapAdmin } from "@/lib/auth-api";
+
 export function signupSetPhone(userId: number, phone: string) {
   return postJson<{
     user_id: number;
@@ -774,7 +975,9 @@ export function loginUserStep1(payload: { email: string; password: string }) {
   return postJson<{
     user_id: number;
     mfa_required: boolean;
+    requires_sms?: boolean;
     channels: string[];
+    message?: string;
     verification: {
       email_expires_at: string;
       phone_expires_at: string;
@@ -784,20 +987,27 @@ export function loginUserStep1(payload: { email: string; password: string }) {
   }>("/auth/login/user", payload, false);
 }
 
-export function loginUserStep2(payload: { user_id: number; channel: string; code?: string; access_key?: string }) {
+export function loginUserStep2(payload: { user_id: number; email_code: string; phone_code: string }) {
   return postJson<AuthSession & { session_access_key?: string }>("/auth/login/user/mfa", payload, false);
 }
 
-export function loginAdminStep1(payload: { email: string; password: string; admin_access_key: string }) {
+export function loginAdminStep1(payload: { email: string; password: string; master_key: string }) {
   return postJson<{
     user_id: number;
     mfa_required: boolean;
     channels: string[];
-    verification: { email_expires_at: string; dev_email_code?: string };
+    message?: string;
+    notifications?: { email_otp?: boolean; sms_otp?: boolean };
+    verification: {
+      email_expires_at: string;
+      phone_expires_at: string;
+      dev_email_code?: string;
+      dev_phone_code?: string;
+    };
   }>("/auth/login/admin", payload, false);
 }
 
-export function loginAdminStep2(payload: { user_id: number; email_code: string }) {
+export function loginAdminStep2(payload: { user_id: number; email_code: string; phone_code: string }) {
   return postJson<AuthSession>("/auth/login/admin/verify", payload, false);
 }
 
@@ -823,10 +1033,66 @@ export function setUserActive(userId: number, is_active: boolean) {
   return patchJson<AuthUser>(`/auth/users/${userId}/status`, { is_active });
 }
 
-export async function refreshAuthSession(): Promise<AuthSession | null> {
-  const refresh = getRefreshToken();
-  if (!refresh) return null;
-  const session = await postJson<AuthSession>("/auth/refresh", { refresh_token: refresh }, false);
-  saveSession(session);
-  return session;
+export async function ensureAuthSession(): Promise<AuthUser | null> {
+  if (!getAccessToken() && !getRefreshToken()) return null;
+  try {
+    return await fetchAuthMe();
+  } catch {
+    const refreshed = await refreshAuthSession();
+    if (!refreshed) return null;
+    try {
+      return await fetchAuthMe();
+    } catch {
+      return null;
+    }
+  }
+}
+
+export type PowerBiFileEntry = {
+  name: string;
+  size_bytes: number;
+  updated_at: string;
+};
+
+export type PowerBiStatus = {
+  export_dir: string;
+  processed_dir: string;
+  export_ready: boolean;
+  last_synced_at?: string | null;
+  export_files: PowerBiFileEntry[];
+  processed_files: PowerBiFileEntry[];
+  datasets: string[];
+  powerbi_report_url?: string;
+  powerbi_embed_url?: string;
+};
+
+export function getPowerBiStatus() {
+  return getJson<PowerBiStatus>("/integrations/powerbi/status");
+}
+
+export function syncPowerBiExport() {
+  return postJson<PowerBiStatus & { missing?: string[]; synced_at?: string }>("/integrations/powerbi/sync", {});
+}
+
+export function startAuthKeepAlive(): () => void {
+  const refresh = async () => {
+    if (!getRefreshToken()) return;
+    await refreshAuthSession();
+  };
+
+  const interval = window.setInterval(() => {
+    void refresh();
+  }, ACCESS_REFRESH_INTERVAL_MS);
+
+  const onVisible = () => {
+    if (document.visibilityState === "visible") {
+      void refresh();
+    }
+  };
+
+  document.addEventListener("visibilitychange", onVisible);
+  return () => {
+    window.clearInterval(interval);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
 }

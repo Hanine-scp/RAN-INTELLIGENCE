@@ -28,6 +28,7 @@ function toStoredMessages(messages: Record<string, unknown>[]): StoredChatMessag
     ...(Array.isArray(msg.thinkingSteps) ? { thinkingSteps: msg.thinkingSteps as string[] } : {}),
     ...(Array.isArray(msg.attachments) ? { attachments: msg.attachments as string[] } : {}),
     ...(typeof msg.userQuestion === "string" ? { userQuestion: msg.userQuestion } : {}),
+    ...(msg.webSearchUsed === true ? { webSearchUsed: true } : {}),
     ...(msg.feedback === "up" || msg.feedback === "down" ? { feedback: msg.feedback } : {}),
   }));
 }

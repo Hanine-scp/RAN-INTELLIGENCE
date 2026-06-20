@@ -67,17 +67,17 @@ export function AiChatSidebar({
   }, [conversations, query]);
 
   return (
-    <aside className="ai-chat-sidebar flex h-full w-[260px] shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-      <div className="border-b border-slate-100 px-4 py-3">
+    <aside className="ai-chat-sidebar flex h-full w-[272px] shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-slate-50/60">
+      <div className="border-b border-slate-200/80 bg-white px-4 py-3.5">
         <p className="text-sm font-bold text-slate-900">RAN Intelligence</p>
         <p className="text-[10px] text-slate-400">{fr ? "Conversations enregistrées" : "Saved conversations"}</p>
       </div>
 
-      <div className="space-y-1 border-b border-slate-100 p-2">
+      <div className="space-y-1 border-b border-slate-200/80 bg-white p-2.5">
         <button
           type="button"
           onClick={onNewChat}
-          className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-red-600 transition hover:bg-red-50"
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-teal-700 transition hover:bg-teal-50"
         >
           <IconPlus />
           {t(language, "ai_sidebar_new")}
@@ -112,7 +112,7 @@ export function AiChatSidebar({
                   <div
                     key={conversation.id}
                     className={`group relative rounded-xl px-2.5 py-2 transition ${
-                      active ? "bg-red-50 text-red-800" : "text-slate-700 hover:bg-slate-50"
+                      active ? "bg-teal-50 text-teal-900 ring-1 ring-teal-100" : "text-slate-700 hover:bg-white"
                     }`}
                   >
                     <button type="button" onClick={() => onSelect(conversation.id)} className="w-full text-left">
@@ -126,7 +126,7 @@ export function AiChatSidebar({
                         type="button"
                         title={fr ? "Épingler" : "Pin"}
                         onClick={() => onTogglePin(conversation.id)}
-                        className={`rounded-md p-1 ${conversation.pinned ? "text-red-600" : "text-slate-400 hover:text-red-600"}`}
+                        className={`rounded-md p-1 ${conversation.pinned ? "text-teal-600" : "text-slate-400 hover:text-teal-600"}`}
                       >
                         <IconPin filled={conversation.pinned} />
                       </button>
@@ -134,7 +134,7 @@ export function AiChatSidebar({
                         type="button"
                         title={fr ? "Supprimer" : "Delete"}
                         onClick={() => onDelete(conversation.id)}
-                        className="rounded-md p-1 text-slate-400 hover:text-red-600"
+                        className="rounded-md p-1 text-slate-400 hover:text-slate-700"
                       >
                         <IconTrash />
                       </button>

@@ -2,16 +2,23 @@ from config.env_loader import load_auth_env
 
 load_auth_env()
 
+from src.services.otel_hooks import init_otel
+from src.services.sentry_hooks import init_sentry
+
+init_sentry()
+
 import asyncio
 from datetime import datetime
 import json
 import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.activity_middleware import PlatformActivityMiddleware
+from api.performance_middleware import PerformanceMiddleware
+from api.rate_limit import rate_limiter
 from api.auth_routes import router as auth_router
 from api.dependencies import get_current_user, require_admin
 from api.schemas import (
@@ -26,6 +33,7 @@ from api.schemas import (
     SiteKpiPayload,
     ClusteringPayload,
     DeleteSnapshotsPayload,
+    ProcessSnapshotsPayload,
     DeltaComparePayload,
     FilterPayload,
     InventoryV2Payload,
@@ -38,39 +46,54 @@ from api.schemas import (
     SerialPatternsPayload,
     SnapshotInvestigationPayload,
     SparesPayload,
+    PlatformSearchPayload,
     TrustSnapshotPayload,
 )
 from config.settings import RAW_DATA_PATH
 from pipeline.main_pipeline import delete_snapshots, process_uploaded_snapshot
 from src.services.auth_service import AuthUser
+from src.services.cache_service import cache_service
 from src.services.data_service import FilterContext, data_service, get_query_observability, lake_ready
+from src.services.feature_flags import feature_flags
+from src.services.metrics_service import metrics_service
 from src.services.platform_activity_service import build_filter_context_summary, platform_activity_service
 from src.services.replacement_analytics_service import replacement_analytics_service
 from src.services.risk_cards_service import risk_cards_service
 from src.services.serial_patterns_service import serial_patterns_service
 from src.services.spares_tracking_service import spares_tracking_service
 from src.services.trust_service import trust_service
+from src.services.guardian_orchestrator import guardian_orchestrator
+from src.services.integrity_service import integrity_service
+from src.services.change_intelligence_service import change_intelligence_service
+from src.services.anomaly_intelligence_service import anomaly_intelligence_service
+from src.services.predictive_risk_service import predictive_risk_service
 from src.services.assistant_file_service import assistant_file_service
 from src.services.assistant_intelligence_service import assistant_intelligence_service
 from src.services.conversation_history_service import conversation_history_service
 from src.services.openai_agent_service import openai_agent_service
+from src.services.platform_search_service import platform_search_service
 from src.services.rag_service import rag_service
 from src.services.ran_anomaly_rules import build_site_rca
 from src.services.timeseries_kpi_service import timeseries_kpi_service
-from src.services.vendor_lake import SUPPORTED_VENDORS, ensure_vendor_scaffold, vendor_status
+from src.services.powerbi_export_service import powerbi_export_service
+from src.services.vendor_lake import SUPPORTED_VENDORS, ensure_vendor_scaffold, find_xml_snapshot_folder, vendor_status
+from src.services.web_search_service import web_search_service
 
-app = FastAPI(title="RAN Intelligence API", version="1.0.0")
+app = FastAPI(title="RAN Guardian Copilot API", version="2.0.0")
+init_otel(app)
 app.include_router(auth_router)
 app.add_middleware(PlatformActivityMiddleware)
 _XML_ROOT = Path(os.getenv("DATA_XML_ROOT", str(RAW_DATA_PATH)))
 
+_allowed_origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PerformanceMiddleware)
 
 
 def _ctx(payload: FilterPayload) -> FilterContext:
@@ -99,6 +122,23 @@ def _validate_snapshot_date(snapshot_date: str) -> str:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="snapshot_date must use format YYYY.MM.DD") from exc
     return value
+
+
+@app.get("/")
+def api_root() -> dict[str, object]:
+    frontend = os.getenv("APP_FRONTEND_URL", os.getenv("FRONTEND_URL", "http://localhost:3000")).rstrip("/")
+    return {
+        "service": "RAN Intelligence API",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/health",
+        "frontend": {
+            "admin_setup": f"{frontend}/admin/setup",
+            "login": f"{frontend}/login",
+            "signup": f"{frontend}/signup",
+        },
+        "hint": "Ouvrez l'interface sur le frontend (port 3000), pas sur ce port API.",
+    }
 
 
 @app.get("/health")
@@ -157,6 +197,8 @@ async def ingest_xml(
         except Exception as exc:
             processing_error = str(exc)
 
+    cache_service.invalidate_prefix("ran:dashboard:")
+    cache_service.invalidate_prefix("ran:filters_options:")
     return {
         "data": {
             "snapshot_date": validated_date,
@@ -183,17 +225,69 @@ async def remove_snapshots(payload: DeleteSnapshotsPayload, _: AuthUser = Depend
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    cache_service.invalidate_prefix("ran:dashboard:")
+    cache_service.invalidate_prefix("ran:filters_options:")
     return {"data": result}
+
+
+@app.post("/snapshots/process")
+async def process_snapshots(payload: ProcessSnapshotsPayload, _: AuthUser = Depends(require_admin)) -> dict:
+    if not payload.snapshot_dates:
+        raise HTTPException(status_code=400, detail="At least one snapshot_date is required.")
+    processed: list[dict] = []
+    errors: list[dict[str, str]] = []
+    for snapshot_date in payload.snapshot_dates:
+        validated = _validate_snapshot_date(snapshot_date.replace("-", "."))
+        folder = find_xml_snapshot_folder(_XML_ROOT, validated)
+        if folder is None:
+            errors.append({"snapshot_date": snapshot_date, "error": "XML folder not found"})
+            continue
+        try:
+            result = await asyncio.to_thread(
+                process_uploaded_snapshot,
+                folder.name,
+                source_root=_XML_ROOT,
+                max_workers=0,
+            )
+            processed.append(result)
+        except Exception as exc:
+            errors.append({"snapshot_date": snapshot_date, "error": str(exc)})
+    if not processed and errors:
+        raise HTTPException(status_code=400, detail=errors)
+    return {"data": {"processed": processed, "errors": errors}}
 
 
 @app.post("/filters/options")
 def filter_options(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_filter_options(_ctx(payload))}
+    ctx = _ctx(payload)
+    cache_key = cache_service.make_key(
+        "filters_options",
+        {"vendor": ctx.vendor, "dates": ctx.selected_dates, "files": ctx.selected_files},
+    )
+    ttl = int(os.getenv("CACHE_FILTER_OPTIONS_TTL_SECONDS", "180"))
+    data = cache_service.get_or_set(cache_key, lambda: data_service.get_filter_options(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/dashboard")
 def dashboard(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_dashboard(_ctx(payload))}
+    ctx = _ctx(payload)
+    cache_key = cache_service.make_key(
+        "dashboard",
+        {
+            "vendor": ctx.vendor,
+            "effective_dates": ctx.effective_dates,
+            "sites": ctx.selected_sites,
+            "smart": (
+                ctx.smart_missing_serial,
+                ctx.smart_duplicates,
+                ctx.smart_critical_quality,
+            ),
+        },
+    )
+    ttl = int(os.getenv("CACHE_DASHBOARD_TTL_SECONDS", "60"))
+    data = cache_service.get_or_set(cache_key, lambda: data_service.get_dashboard(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/sites")
@@ -288,6 +382,7 @@ def asset_product_codes_v2(payload: AssetDistributionV2Payload, _: AuthUser = De
             page_size=payload.page_size,
             search=payload.search,
             unique_serial_only=payload.unique_serial_only,
+            pivot_product_code=payload.pivot_product_code,
         )
     }
 
@@ -360,6 +455,40 @@ def spares_tracking(payload: SparesPayload, _: AuthUser = Depends(get_current_us
 @app.get("/assistant/status")
 def assistant_status(_: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": openai_agent_service.status()}
+
+
+@app.post("/search/platform")
+def search_platform(payload: PlatformSearchPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+    query = (payload.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    return {"data": platform_search_service.search(_ctx(payload), query)}
+
+
+@app.get("/search/web")
+def search_web(
+    q: str = "",
+    language: str = "Français",
+    max_results: int = 8,
+    _: AuthUser = Depends(get_current_user),
+) -> dict:
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="q is required")
+    payload = web_search_service.search(query, language=language, max_results=max_results)
+    return {
+        "data": {
+            **web_search_service.build_meta(payload),
+            "results": [
+                {
+                    "title": row.get("title"),
+                    "snippet": row.get("snippet"),
+                    "url": row.get("url"),
+                }
+                for row in (payload.get("results") or [])
+            ],
+        }
+    }
 
 
 @app.post("/kpi/site-timeseries")
@@ -436,7 +565,13 @@ def assistant_insight(payload: AssistantInsightPayload, user: AuthUser = Depends
         question=payload.question,
         context_summary=build_filter_context_summary(ctx),
     )
-    result = assistant_intelligence_service.compose(ctx, payload.question, _history_from_payload(payload))
+    result = assistant_file_service.build_insight(
+        ctx,
+        payload.question,
+        [],
+        web_search=False,
+        history=_history_from_payload(payload),
+    )
     if payload.conversation_id:
         result["conversation_id"] = payload.conversation_id
     return {"data": result}
@@ -569,6 +704,46 @@ def ops_query_metrics(_: AuthUser = Depends(require_admin)) -> dict:
     return {"data": get_query_observability()}
 
 
+@app.get("/ops/http-metrics")
+def ops_http_metrics(_: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": metrics_service.http_summary()}
+
+
+@app.get("/ops/cache-stats")
+def ops_cache_stats(_: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": cache_service.stats()}
+
+
+@app.get("/ops/feature-flags")
+def ops_feature_flags(_: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": feature_flags.as_dict()}
+
+
+@app.get("/metrics")
+def prometheus_metrics():
+    from starlette.responses import PlainTextResponse
+
+    return PlainTextResponse(metrics_service.prometheus_text(), media_type="text/plain; version=0.0.4")
+
+
+@app.post("/ops/client-vitals")
+async def client_vitals(request: Request, payload: dict) -> dict:
+    import logging
+
+    rate_limiter.check(request, namespace="client_vitals", max_requests=120)
+    logging.getLogger("ran.vitals").info(json.dumps({"event": "client_vitals", **payload}))
+    return {"data": {"ok": True}}
+
+
+@app.post("/ops/client-errors")
+async def client_errors(request: Request, payload: dict) -> dict:
+    import logging
+
+    rate_limiter.check(request, namespace="client_errors", max_requests=60)
+    logging.getLogger("ran.errors").error(json.dumps({"event": "client_error", **payload}))
+    return {"data": {"ok": True}}
+
+
 @app.get("/trust/anchors")
 def trust_anchors(_: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": trust_service.list_anchors()}
@@ -587,3 +762,85 @@ def trust_anchor_latest(_: AuthUser = Depends(require_admin)) -> dict:
 @app.post("/trust/verify")
 def trust_verify(payload: TrustSnapshotPayload, _: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": trust_service.verify_snapshot(payload.snapshot_date, payload.snapshot_path or None)}
+
+
+@app.post("/guardian/overview")
+def guardian_overview(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": guardian_orchestrator.get_guardian_overview(_ctx(payload))}
+
+
+@app.post("/guardian/integrity")
+def guardian_integrity(payload: TrustSnapshotPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": integrity_service.get_snapshot_health(payload.snapshot_date)}
+
+
+@app.post("/guardian/verify")
+def guardian_verify(payload: TrustSnapshotPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": integrity_service.verify_snapshot_integrity(payload.snapshot_date)}
+
+
+@app.post("/guardian/changes")
+def guardian_changes(payload: DeltaComparePayload, _: AuthUser = Depends(get_current_user)) -> dict:
+    return {
+        "data": change_intelligence_service.compare_snapshots(
+            payload.compare_date_1,
+            payload.compare_date_2,
+            vendor=payload.vendor,
+        )
+    }
+
+
+@app.post("/guardian/anomalies")
+def guardian_anomalies(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload)
+    dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
+    target = dates[-1] if dates else None
+    rows = anomaly_intelligence_service.detect_anomalies(ctx, snapshot_date=target, persist=True) if target else []
+    return {"data": {"snapshot_date": target, "count": len(rows), "rows": rows[:100]}}
+
+
+@app.post("/guardian/risks")
+def guardian_risks(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload)
+    dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
+    target = dates[-1] if dates else None
+    rows = predictive_risk_service.compute_risk_predictions(ctx, snapshot_date=target, persist=True) if target else []
+    return {"data": {"snapshot_date": target, "count": len(rows), "rows": rows[:50]}}
+
+
+@app.post("/guardian/run")
+async def guardian_run(payload: ProcessSnapshotsPayload, _: AuthUser = Depends(require_admin)) -> dict:
+    results = []
+    for snapshot_date in payload.snapshot_dates:
+        try:
+            result = await asyncio.to_thread(
+                guardian_orchestrator.run_after_ingest,
+                snapshot_date,
+                vendor="nokia",
+            )
+            results.append(result)
+        except Exception as exc:
+            results.append({"snapshot_date": snapshot_date, "error": str(exc)})
+    return {"data": results}
+
+
+@app.get("/integrations/powerbi/status")
+def powerbi_status(_: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": powerbi_export_service.status()}
+
+
+@app.post("/integrations/powerbi/sync")
+async def powerbi_sync(_: AuthUser = Depends(require_admin)) -> dict:
+    result = await asyncio.to_thread(powerbi_export_service.sync_export)
+    return {"data": result}
+
+
+@app.get("/integrations/powerbi/status")
+def powerbi_status(_: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": powerbi_export_service.status()}
+
+
+@app.post("/integrations/powerbi/sync")
+async def powerbi_sync(_: AuthUser = Depends(require_admin)) -> dict:
+    result = await asyncio.to_thread(powerbi_export_service.sync_export)
+    return {"data": result}

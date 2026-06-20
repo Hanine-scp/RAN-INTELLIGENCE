@@ -7,6 +7,10 @@ class DeleteSnapshotsPayload(BaseModel):
     snapshot_dates: list[str] = Field(default_factory=list)
 
 
+class ProcessSnapshotsPayload(BaseModel):
+    snapshot_dates: list[str] = Field(default_factory=list)
+
+
 class FilterPayload(BaseModel):
     selected_dates: list[str] = Field(default_factory=list)
     selected_files: list[str] = Field(default_factory=list)
@@ -24,13 +28,23 @@ class FilterPayload(BaseModel):
     vendor: str = "nokia"
 
 
+class PlatformSearchPayload(FilterPayload):
+    query: str = ""
+
+
+class WebSearchQueryPayload(BaseModel):
+    q: str = ""
+    language: str = "Français"
+    max_results: int = Field(default=8, ge=1, le=12)
+
+
 class InventoryPayload(FilterPayload):
     object_types: list[str] = Field(default_factory=list)
 
 
 class PaginatedPayload(FilterPayload):
     page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=500, ge=50, le=2000)
+    page_size: int = Field(default=0, ge=0)  # 0 = toutes les lignes (sans limite)
     search: str = ""
     sort_by: str = ""
     sort_direction: str = "asc"
@@ -43,6 +57,7 @@ class InventoryV2Payload(PaginatedPayload):
 class AssetDistributionV2Payload(PaginatedPayload):
     object_types: list[str] = Field(default_factory=list)
     unique_serial_only: bool = False
+    pivot_product_code: bool = False
 
 
 class AssistantQuestion(BaseModel):
@@ -187,20 +202,35 @@ class UserLoginStep1Payload(BaseModel):
 
 class UserLoginStep2Payload(BaseModel):
     user_id: int
-    channel: str
-    code: str = ""
-    access_key: str = ""
+    email_code: str
+    phone_code: str
 
 
 class AdminLoginStep1Payload(BaseModel):
     email: str
     password: str
-    admin_access_key: str
+    master_key: str = Field(..., min_length=4, max_length=128)
 
 
 class AdminLoginStep2Payload(BaseModel):
     user_id: int
     email_code: str
+    phone_code: str
+
+
+class AdminBootstrapPayload(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    phone: str
+    recovery_email: str = Field(..., min_length=5, max_length=254)
+    bootstrap_key: str
+
+
+class AdminBootstrapVerifyPayload(BaseModel):
+    user_id: int
+    email_code: str
+    phone_code: str
 
 
 class RefreshTokenPayload(BaseModel):
@@ -215,6 +245,34 @@ class CreateAccessKeyPayload(BaseModel):
 
 class UserStatusPayload(BaseModel):
     is_active: bool
+
+
+class RegisterPayload(BaseModel):
+    email: str = Field(..., min_length=5, max_length=254)
+    password: str = Field(..., min_length=8, max_length=128)
+    full_name: str = Field(..., min_length=2, max_length=120)
+
+
+class LoginPayload(BaseModel):
+    email: str = Field(..., min_length=5, max_length=254)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class ForgotPasswordPayload(BaseModel):
+    email: str = Field(..., min_length=5, max_length=254)
+    channel: str = Field(default="email", pattern="^(email|sms)$")
+    recovery_email: str | None = Field(default=None, max_length=254)
+
+
+class ResetPasswordPayload(BaseModel):
+    token: str | None = Field(default=None, min_length=16, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=128)
+    email: str | None = Field(default=None, max_length=254)
+    sms_code: str | None = Field(default=None, max_length=6)
+
+
+class ResendVerificationPayload(BaseModel):
+    email: str = Field(..., min_length=5, max_length=254)
 
 
 class ApiEnvelope(BaseModel):

@@ -1,6 +1,7 @@
 type NavIconProps = {
   name: string;
   className?: string;
+  style?: React.CSSProperties;
 };
 
 const PATHS: Record<string, React.ReactNode> = {
@@ -95,11 +96,17 @@ const PATHS: Record<string, React.ReactNode> = {
       <path d="M18.5 16.5 19 18l1.5.5L19 19l-.5 1.5L18 19l-1.5-.5L18 18Z" />
     </>
   ),
+  upload: (
+    <>
+      <path d="M12 16V4m0 0L8 8m4-4 4 4" />
+      <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </>
+  ),
 };
 
-export function NavIcon({ name, className = "h-5 w-5" }: NavIconProps) {
+export function NavIcon({ name, className = "h-5 w-5", style }: NavIconProps) {
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       {PATHS[name] ?? PATHS.box}
     </svg>
   );
