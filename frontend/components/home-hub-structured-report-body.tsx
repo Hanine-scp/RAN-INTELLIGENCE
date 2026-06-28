@@ -65,7 +65,8 @@ export function HomeHubStructuredReportBody({
 }: HomeHubStructuredReportBodyProps) {
   const fr = language === "Français";
   const lang = fr ? "fr" : "en";
-  const aiMessage = useMemo(() => (aiInsight?.message ? cleanAiReportMessage(aiInsight.message) : ""), [aiInsight?.message]);
+  const aiInsightMessage = aiInsight?.message;
+  const aiMessage = useMemo(() => (aiInsightMessage ? cleanAiReportMessage(aiInsightMessage) : ""), [aiInsightMessage]);
 
   const pageKpis = useMemo(() => getHomeHubPageKpis(pageContext, fr), [fr, pageContext]);
   const reportKpis = useMemo(() => {

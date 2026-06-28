@@ -156,12 +156,13 @@ export function DeltaAiReportModal({
   onDownloadText,
 }: DeltaAiReportModalProps) {
   const fr = language === "Français";
+  const aiInsightMessage = aiInsight?.message;
   const aiMessage = useMemo(() => {
-    const cleaned = aiInsight?.message ? cleanAiReportMessage(aiInsight.message) : "";
+    const cleaned = aiInsightMessage ? cleanAiReportMessage(aiInsightMessage) : "";
     if (cleaned) return cleaned;
     if (report?.mode === "ai") return buildDeltaLocalAiMarkdown(fr, report, nocQuery);
     return "";
-  }, [aiInsight?.message, fr, nocQuery, report]);
+  }, [aiInsightMessage, fr, nocQuery, report]);
 
   const kpis = report ? getDeltaReportKpis(report, fr) : [];
   const tables = report ? getDeltaReportTables(report, fr) : [];

@@ -198,7 +198,8 @@ export function ImportAiReportModal({
 }: ImportAiReportModalProps) {
   const fr = language === "Français";
   const lang = fr ? "fr" : "en";
-  const aiMessage = useMemo(() => (aiInsight?.message ? cleanAiReportMessage(aiInsight.message) : ""), [aiInsight?.message]);
+  const aiInsightMessage = aiInsight?.message;
+  const aiMessage = useMemo(() => (aiInsightMessage ? cleanAiReportMessage(aiInsightMessage) : ""), [aiInsightMessage]);
 
   const riskScore = report?.risk_index ?? 0;
   const decisions = report?.decisions ?? [];

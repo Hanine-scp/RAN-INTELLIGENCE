@@ -138,7 +138,8 @@ export function GuardianAiReportModal({
   onDownloadText,
 }: GuardianAiReportModalProps) {
   const fr = language === "Français";
-  const aiMessage = useMemo(() => (aiInsight?.message ? cleanAiReportMessage(aiInsight.message) : ""), [aiInsight?.message]);
+  const aiInsightMessage = aiInsight?.message;
+  const aiMessage = useMemo(() => (aiInsightMessage ? cleanAiReportMessage(aiInsightMessage) : ""), [aiInsightMessage]);
 
   const viewLabel = report ? tabViewLabel(report.activeView, fr) : "—";
   const kpis = report ? getTabReportKpis(report, fr) : [];
