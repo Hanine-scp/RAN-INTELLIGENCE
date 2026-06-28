@@ -1,0 +1,83 @@
+{
+  "name": "RAN — Alerte anomalies",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "hours", "hoursInterval": 1 }
+          ]
+        }
+      },
+      "id": "trigger-hourly",
+      "name": "Toutes les heures",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8010/guardian/overview",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{$env.RAN_API_TOKEN}}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"selected_dates\": [],\n  \"vendor\": \"nokia\"\n}",
+        "options": {}
+      },
+      "id": "fetch-overview",
+      "name": "Récupérer anomalies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{$json[\"data\"][\"anomaly_count\"]}}",
+              "rightValue": 5,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-threshold",
+      "name": "Seuil dépassé ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "content": "=⚠️ Alerte NOC\n\n{{$json[\"data\"][\"anomaly_count\"]}} anomalies actives (seuil: 5).\nSnapshot {{$json[\"data\"][\"latest_snapshot\"]}}.\n\nConfigurez ici un nœud Email / Teams / Slack pour notifier l'équipe NOC.",
+        "height": 220,
+        "width": 360
+      },
+      "id": "notify-placeholder",
+      "name": "→ Brancher Email/Teams ici",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1080, 200]
+    }
+  ],
+  "connections": {
+    "Toutes les heures": {
+      "main": [[{ "node": "Récupérer anomalies", "type": "main", "index": 0 }]]
+    },
+    "Récupérer anomalies": {
+      "main": [[{ "node": "Seuil dépassé ?", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "active": false
+}

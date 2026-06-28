@@ -7,11 +7,13 @@ import { useAppContext } from "@/components/app-provider";
 import { askAssistantInsight, type AssistantInsightResponse } from "@/lib/api";
 import {
   buildDeltaAiPrompt,
+  buildDeltaLocalAiMarkdown,
   buildDeltaPageReport,
   type DeltaComparePayload,
   type DeltaPageReport,
 } from "@/lib/delta-report-data";
 import { buildDeltaReportExportText, openDeltaReportPdf } from "@/lib/delta-report-export";
+import { cleanAiReportMessage } from "@/lib/import-report-export";
 import { t } from "@/lib/i18n";
 
 type DeltaAiReportSectionProps = {
@@ -68,9 +70,20 @@ export function DeltaAiReportSection({
             { ...payload, compare_date_1: referenceDate, compare_date_2: comparisonDate } as typeof payload,
             prompt,
           );
-          setAiInsight(insight);
+          const cleaned = insight.message ? cleanAiReportMessage(insight.message) : "";
+          setAiInsight({
+            ...insight,
+            message: cleaned || buildDeltaLocalAiMarkdown(fr, nextReport, customNeeds),
+          });
         } catch {
-          setAiInsight(null);
+          setAiInsight({
+            message: buildDeltaLocalAiMarkdown(fr, nextReport, customNeeds),
+            intent: "expert_report",
+            rows: [],
+            details: [],
+            sources: [],
+            suggested_questions: [],
+          });
         }
       }
     } catch (err) {
@@ -129,6 +142,7 @@ export function DeltaAiReportSection({
         error={error}
         report={report}
         aiInsight={aiInsight}
+        nocQuery={customNeeds}
         onDownloadPdf={downloadPdf}
         onDownloadText={downloadText}
       />

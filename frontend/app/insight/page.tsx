@@ -1,7 +1,12 @@
 "use client";
 
-import { InsightPageLayout } from "@/components/insight-page-layout";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function InsightPage() {
-  return <InsightPageLayout />;
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/power-bi");
+  }, [router]);
+  return null;
 }

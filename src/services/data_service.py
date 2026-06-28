@@ -30,12 +30,15 @@ _QUERY_LABELED_MS: deque[tuple[str, float]] = deque(maxlen=500)
 _DUCK_LOCK = threading.Lock()
 _DUCK_CONN: duckdb.DuckDBPyConnection | None = None
 _QUERY_TIMEOUT_MS = int(os.getenv("DUCKDB_QUERY_TIMEOUT_MS", "30000"))
+_DUCKDB_THREADS = int(os.getenv("DUCKDB_THREADS", "0"))
 
 
 def _get_duck_conn() -> duckdb.DuckDBPyConnection:
     global _DUCK_CONN
     if _DUCK_CONN is None:
         _DUCK_CONN = duckdb.connect(database=":memory:")
+        if _DUCKDB_THREADS > 0:
+            _DUCK_CONN.execute(f"SET threads TO {_DUCKDB_THREADS}")
     return _DUCK_CONN
 
 
@@ -402,13 +405,16 @@ class DataService:
         xml_snapshots = discover_xml_snapshots(ctx.vendor)
         date_options = [str(s["snapshot_date"]) for s in xml_snapshots] or get_snapshot_dates()
 
-        total_sites_df = query(
-            f"""
-            SELECT COUNT(DISTINCT CAST(site_id AS VARCHAR) || '-' || CAST(snapshot_date AS VARCHAR)) AS total_sites
-            FROM read_parquet('{lake.sites}')
-            """
-        )
-        total_sites = int(total_sites_df.iloc[0]["total_sites"]) if not total_sites_df.empty else 0
+        total_sites = 0
+        if lake.has_sites_data:
+            total_sites_df = query(
+                f"""
+                SELECT COUNT(DISTINCT CAST(site_id AS VARCHAR) || '-' || CAST(snapshot_date AS VARCHAR)) AS total_sites
+                FROM read_parquet('{lake.sites}')
+                """,
+                label="filter_options_total_sites",
+            )
+            total_sites = int(total_sites_df.iloc[0]["total_sites"]) if not total_sites_df.empty else 0
         if total_sites == 0:
             total_sites = count_xml_files(ctx.vendor)
 
@@ -2673,6 +2679,23 @@ class DataService:
         }
 
     def get_assistant_insight(self, ctx: FilterContext, question: str) -> dict[str, Any]:
+        from src.services.report_prompt_utils import is_expert_report_prompt
+
+        if is_expert_report_prompt(question):
+            return {
+                "intent": "expert_report",
+                "message": "",
+                "rows": [],
+                "details": [],
+                "sources": [],
+                "suggested_questions": [],
+                "sql_guardrails": {
+                    "mode": "template_sql_only",
+                    "allowlist_tables": sorted(self._COPILOT_ALLOWLIST.keys()),
+                    "dynamic_sql_generation": False,
+                },
+            }
+
         q = (question or "").strip().lower()
         if not q:
             q = "help"

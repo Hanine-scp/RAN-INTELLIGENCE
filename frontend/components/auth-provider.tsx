@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await logoutSession();
     } catch {
-      // ignore network errors on logout
+      // ignore logout network errors
     } finally {
       clearSession();
       setUser(null);

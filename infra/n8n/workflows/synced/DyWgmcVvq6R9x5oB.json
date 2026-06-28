@@ -1,0 +1,76 @@
+[
+  {
+    "id": "DyWgmcVvq6R9x5oB",
+    "name": "RAN \u00b7 Power BI Sync",
+    "active": true,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "ran/powerbi-sync",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "wh-DyWgmcVvq6R9x5oB",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "webhookId": "ran-powerbi-sync"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.RAN_BACKEND_URL || 'http://host.docker.internal:8010' }}/integrations/powerbi/sync",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.RAN_API_TOKEN }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "pbi-sync",
+        "name": "Power BI sync",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          520,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Power BI sync",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]

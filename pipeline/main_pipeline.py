@@ -857,15 +857,28 @@ def process_uploaded_snapshot(
 
     try:
         from src.services.guardian_orchestrator import guardian_orchestrator
+        from src.services.n8n_service import n8n_service
 
-        guardian = guardian_orchestrator.run_after_ingest(
-            batch.folder_date,
-            vendor="nokia",
-            file_count=xml_count,
+        n8n_result = n8n_service.trigger_post_ingest_sync(
+            {
+                "event": "post_ingest",
+                "snapshot_date": batch.folder_date,
+                "vendor": "nokia",
+                "xml_count": xml_count,
+                "processing_seconds": round(elapsed, 2),
+            }
         )
-        result["guardian"] = guardian
+        if n8n_result is not None:
+            result["n8n"] = n8n_result
+        else:
+            guardian = guardian_orchestrator.run_after_ingest(
+                batch.folder_date,
+                vendor="nokia",
+                file_count=xml_count,
+            )
+            result["guardian"] = guardian
     except Exception as exc:
-        result["guardian_error"] = str(exc)
+        result["automation_error"] = str(exc)
 
     return result
 
@@ -1225,7 +1238,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         "--source-root",
         type=Path,
         default=None,
-        help="Dossier DATA.XML. Défaut: <root>/DATA.XML",
+        help=f"Dossier DATA.XML. Défaut: {RAW_DATA_PATH}",
     )
 
     parser.add_argument(

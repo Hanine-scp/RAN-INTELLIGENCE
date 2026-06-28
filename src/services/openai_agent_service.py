@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-import requests
-
+from src.services import llm_client
 from src.services.assistant_intelligence_service import BRAND, _flexible_suggestions, _is_french
 from src.services.data_service import FilterContext
 from src.services.ran_ai_tools import OPENAI_TOOL_DEFINITIONS, execute_ran_tool
 
 MAX_TOOL_ROUNDS = 6
 MAX_TOOL_RESULT_CHARS = 12000
+# LLM local (Ollama sur CPU) : on borne fortement la boucle agentique et la
+# longueur de génération pour éviter des temps de réponse de plusieurs minutes.
+LOCAL_MAX_TOOL_ROUNDS = 2
+LOCAL_MAX_TOKENS = 700
 
 
 def _system_prompt(ctx: FilterContext, web_context: str = "") -> str:
@@ -49,6 +51,12 @@ Architecture RAN Guardian (4 moteurs) :
 - Tu n'accèdes JAMAIS directement au réseau — appelle les outils (verify_snapshot_integrity, compare_snapshots, get_guardian_anomalies, get_risk_predictions, generate_noc_report…).
 - Human-in-the-loop : recommande, ne modifie jamais le réseau automatiquement.
 
+Routage intelligent des sources :
+- Données réseau INTERNES (sites, anomalies, inventaire, snapshots, KPI, RCA, remplacements) → outils RAN dédiés.
+- CONNAISSANCES GÉNÉRALES (définitions, concepts télécom, bonnes pratiques constructeur, actualités) → outil `search_web`.
+- Procédures Nokia/Huawei documentées en interne → `search_vendor_procedures` (RAG).
+- Tu peux combiner données internes ET web dans une même réponse, en citant clairement chaque source.
+
 Contexte filtre actif : vendor={vendor}, période={period}.
 
 Style de réponse premium (comme NOC expert) :
@@ -72,6 +80,12 @@ Hybrid architecture:
 - MUST call provided tools (get_site_status, generate_site_rca, generate_noc_report, etc.).
 - A rules engine detects anomalies BEFORE your explanation.
 
+Smart source routing:
+- INTERNAL network data (sites, anomalies, inventory, snapshots, KPIs, RCA, replacements) → dedicated RAN tools.
+- GENERAL knowledge (definitions, telecom concepts, vendor best practices, news) → `search_web` tool.
+- Internal Nokia/Huawei documented procedures → `search_vendor_procedures` (RAG).
+- You may combine internal data AND web in a single answer, clearly citing each source.
+
 Active filter context: vendor={vendor}, period={period}.
 
 Premium response style (NOC expert):
@@ -90,36 +104,55 @@ Hard rule: never introduce yourself unprompted (no « I am Guardian Copilot… �
 
 
 class OpenAIAgentService:
-    def __init__(self) -> None:
-        self.api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        self.model = os.getenv("OPENAI_MODEL", "gpt-4o").strip()
-        self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        self.timeout = int(os.getenv("OPENAI_TIMEOUT_SEC", "90"))
+    @property
+    def model(self) -> str:
+        return llm_client.chat_model()
+
+    @property
+    def provider(self) -> str:
+        return llm_client.provider_name()
 
     def is_enabled(self) -> bool:
-        return bool(self.api_key)
+        return llm_client.llm_enabled()
 
     def status(self) -> dict[str, Any]:
         from src.services.claude_agent_service import claude_agent_service
         from src.services.web_search_service import web_search_service
 
+        llm_status = llm_client.status()
         return {
             "enabled": self.is_enabled(),
-            "engine": "openai" if self.is_enabled() else "local",
+            "engine": llm_status["provider"] if self.is_enabled() else "local",
             "model": self.model if self.is_enabled() else None,
             "brand": BRAND,
             "tools": [t["function"]["name"] for t in OPENAI_TOOL_DEFINITIONS],
-            "architecture": "hybrid_openai_tools",
+            "architecture": (
+                "hybrid_azure_openai_tools" if llm_client.azure_enabled()
+                else "hybrid_local_llm_tools" if llm_client.local_llm_enabled()
+                else "hybrid_openai_tools"
+            ),
+            "data_residency": llm_status["data_residency"],
             "claude": claude_agent_service.status(),
-            "rag": {"engine": "pgvector", "procedures": "nokia_huawei"},
+            "rag": {"engine": "sqlite_pgvector", "procedures": "nokia_huawei"},
             "timeseries": {"engine": "timescaledb", "metrics": ["CSSR", "DCR", "HOSR", "PRB_UTIL", "AVAILABILITY"]},
             "web_search": web_search_service.status(),
             "compliance": {
                 "llm": {
-                    "provider": "openai",
-                    "integration": "official_chat_completions_api",
+                    "provider": llm_status["provider"],
+                    "integration": (
+                        "azure_openai_api" if llm_client.azure_enabled()
+                        else "local_self_hosted" if llm_client.local_llm_enabled()
+                        else "official_chat_completions_api"
+                    ),
                     "model": self.model if self.is_enabled() else None,
-                    "note": "Aucun code ChatGPT embarqué — communication via clé API OpenAI.",
+                    "data_residency": llm_status["data_residency"],
+                    "note": (
+                        "Azure OpenAI — données traitées dans votre tenant Azure, jamais utilisées pour l'entraînement."
+                        if llm_client.azure_enabled()
+                        else "LLM auto-hébergé (Ollama) — aucune donnée ne quitte votre infrastructure."
+                        if llm_client.local_llm_enabled()
+                        else "Aucun code ChatGPT embarqué — communication via clé API OpenAI."
+                    ),
                 },
                 "interface": {
                     "product": "Guardian Nexus AI",
@@ -134,27 +167,14 @@ class OpenAIAgentService:
         }
 
     def _chat(self, messages: list[dict[str, Any]], use_tools: bool = True) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": 0.35,
-        }
-        if use_tools:
-            payload["tools"] = OPENAI_TOOL_DEFINITIONS
-            payload["tool_choice"] = "auto"
-
-        response = requests.post(
-            f"{self.base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=self.timeout,
+        max_tokens = LOCAL_MAX_TOKENS if llm_client.local_llm_enabled() else None
+        return llm_client.chat_completion(
+            messages,
+            tools=OPENAI_TOOL_DEFINITIONS if use_tools else None,
+            tool_choice="auto" if use_tools else None,
+            temperature=0.35,
+            max_tokens=max_tokens,
         )
-        if response.status_code >= 400:
-            raise RuntimeError(f"OpenAI API error {response.status_code}: {response.text[:500]}")
-        return response.json()
 
     def _serialize_tool_result(self, result: dict[str, Any]) -> str:
         text = json.dumps(result, ensure_ascii=False, default=str)
@@ -188,8 +208,10 @@ class OpenAIAgentService:
         collected_details: list[dict[str, Any]] = []
         intent = "openai_agent"
 
+        max_rounds = LOCAL_MAX_TOOL_ROUNDS if llm_client.local_llm_enabled() else MAX_TOOL_ROUNDS
+
         try:
-            for _ in range(MAX_TOOL_ROUNDS):
+            for _ in range(max_rounds):
                 data = self._chat(messages, use_tools=True)
                 choice = (data.get("choices") or [{}])[0]
                 message = choice.get("message") or {}

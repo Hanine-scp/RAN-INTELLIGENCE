@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from lxml import etree
 import pandas as pd
 
+from config.settings import RAW_DATA_PATH
 from src.parsers.cell_classification import classify_cell
 from src.parsers.parsed_values import (
     finalize_equipment_field_values,
@@ -17,12 +18,9 @@ from src.parsers.parsed_values import (
     resolve_parsed_value,
 )
 
+DEFAULT_DATA_XML_ROOT = RAW_DATA_PATH
+
 logger = logging.getLogger(__name__)
-
-
-# ============================================================
-# CONFIGURATION GÉNÉRALE
-# ============================================================
 
 EQUIPMENT_TYPES = {
     "CABINET", "SMOD", "RMOD", "BBMOD", "RETU", "ALD", "ANTL",
@@ -334,18 +332,7 @@ def extract_equipment_fields(
     params: Dict[str, Optional[str]],
     object_type: str = "",
 ) -> Dict[str, Optional[str]]:
-    """
-    Map Nokia EQM / EQMR params to inventory fields.
-
-    EQM (planned config):
-      BBMOD/SMOD/RMOD -> product_code=prodCodePlanned only
-      CABINET/ANTL    -> no serial/code/name (filled from *_R or antPortId)
-
-    EQMR (*_R runtime, authoritative when merged):
-      BBMOD/SMOD/RMOD/CABINET -> productCode, productName, serialNumber
-      RETU -> antSerial, antModel
-      ALD  -> serialNumber, productCode, productName|productCode
-    """
+  
     object_type = str(object_type or "").upper()
     base_type = base_object_type(object_type)
     is_runtime = object_type.endswith("_R")
@@ -1048,14 +1035,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "xml_folder",
         type=Path,
-        help="Dossier contenant les XML à parser.",
+        nargs="?",
+        default=None,
+        help=(
+            "Dossier contenant les XML à parser. "
+            f"Défaut: {DEFAULT_DATA_XML_ROOT} (ou sous-dossier date si --date)."
+        ),
     )
 
     parser.add_argument(
         "--date",
         type=str,
         default=None,
-        help="Date forcée, exemple: 2025-02-13.",
+        help="Dossier snapshot sous DATA.XML, exemple: 2026.05.14 ou 2026-05-14.",
+    )
+
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        default=None,
+        help=f"Racine DATA.XML pour source_path. Défaut: {DEFAULT_DATA_XML_ROOT}.",
     )
 
     parser.add_argument(
@@ -1073,12 +1072,24 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    source_root = (args.source_root or DEFAULT_DATA_XML_ROOT).resolve()
+    if args.xml_folder is not None:
+        xml_folder = args.xml_folder.resolve()
+    elif args.date:
+        date_folder = args.date.strip().replace("-", ".")
+        xml_folder = source_root / date_folder
+    else:
+        xml_folder = source_root
+
+    snapshot_date = normalize_date(args.date) if args.date else None
+    date_folder_name = args.date.strip().replace("-", ".") if args.date else None
+
     sites, equipment = parse_folder_parallel(
-        xml_folder=args.xml_folder,
-        forced_snapshot_date=args.date,
-        date_folder=args.date,
+        xml_folder=xml_folder,
+        forced_snapshot_date=snapshot_date,
+        date_folder=date_folder_name,
         recursive=not args.no_recursive,
-        source_root=args.xml_folder,
+        source_root=source_root,
         max_workers=args.max_workers,
     )
 

@@ -97,7 +97,7 @@ export function FloatingCopilot() {
         onClick={() => setOpen((v) => !v)}
         title={open ? t(language, "copilot_launcher_close") : t(language, "copilot_launcher_open")}
         aria-label={open ? t(language, "copilot_launcher_close") : t(language, "copilot_launcher_open")}
-        className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-lg shadow-teal-600/30 transition hover:scale-105 hover:shadow-xl active:scale-95 sm:right-6"
+        className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-[#1E293B] to-[#0F172A] text-white shadow-lg shadow-slate-900/30 transition hover:scale-105 hover:shadow-xl active:scale-95 sm:right-6"
       >
         {open ? (
           <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
@@ -114,8 +114,8 @@ export function FloatingCopilot() {
         )}
         {!open ? (
           <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-300 opacity-75" />
-            <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-teal-300 ring-2 ring-white" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
+            <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-sky-400 ring-2 ring-white" />
           </span>
         ) : null}
       </button>

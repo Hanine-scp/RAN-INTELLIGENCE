@@ -1,12 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { CartographieReseauPage } from "@/components/cartographie-reseau-page";
 
-export default function PowerBiPage() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace("/insight?view=executive");
-  }, [router]);
-  return null;
+export default function PowerBiRoute() {
+  return <CartographieReseauPage />;
 }

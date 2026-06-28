@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import uuid
 from typing import Any
 
-import requests
-
+from src.services import llm_client
 from src.services.knowledge_database import knowledge_db_connect, try_enable_extension
 
 EMBED_DIM = 1536
@@ -132,21 +130,7 @@ def _chunk_text(text: str, size: int = 600) -> list[str]:
 
 
 def _embed_text(text: str) -> list[float] | None:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return None
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/embeddings",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small"), "input": text[:8000]},
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["data"][0]["embedding"]
-    except Exception:
-        return None
+    return llm_client.create_embedding(text)
 
 
 def _keyword_score(query: str, content: str) -> float:
@@ -211,8 +195,22 @@ class RagService:
                 )
         return True
 
-    def search(self, query_text: str, vendor: str | None = None, top_k: int = 5) -> dict[str, Any]:
+    def _document_count(self) -> int:
+        try:
+            with knowledge_db_connect() as conn:
+                row = conn.execute("SELECT COUNT(*) AS n FROM rag_documents").fetchone()
+                return int(row["n"]) if row else 0
+        except Exception:
+            return 0
+
+    def ensure_seeded(self) -> None:
+        """Seed default Nokia/Huawei procedures if the knowledge base is empty."""
         self.init_tables()
+        if self._document_count() == 0:
+            self.seed_defaults()
+
+    def search(self, query_text: str, vendor: str | None = None, top_k: int = 5) -> dict[str, Any]:
+        self.ensure_seeded()
         top_k = max(1, min(top_k, 20))
         with knowledge_db_connect() as conn:
             if vendor:

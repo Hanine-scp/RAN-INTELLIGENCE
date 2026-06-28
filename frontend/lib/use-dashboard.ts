@@ -34,7 +34,7 @@ export function useDashboard(payload: FilterPayload) {
     {
       revalidateOnFocus: false,
       revalidateOnReconnect: true,
-      dedupingInterval: 30_000,
+      dedupingInterval: 120_000,
       keepPreviousData: true,
       errorRetryCount: 2,
     },

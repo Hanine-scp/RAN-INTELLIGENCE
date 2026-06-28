@@ -20,7 +20,7 @@ jobs:
       - name: Backend smoke import
         run: python -c "from api.main import app; print('backend_ok')"
       - name: Backend tests
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/backend -q
 
       - name: Daily ingest script compiles
         run: python -m compileall scripts/daily_ingest.py
@@ -44,5 +44,10 @@ jobs:
         run: npm ci
       - name: Lint frontend
         run: npm run lint
+      - name: Frontend unit tests
+        run: |
+          cd ../tests/frontend
+          npm ci
+          npm test
       - name: Build frontend
         run: npm run build

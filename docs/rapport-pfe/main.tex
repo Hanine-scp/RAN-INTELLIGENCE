@@ -95,9 +95,23 @@
 \caption{\textbf{#2}}\end{figure}}
 
 \newcommand{\SprintBacklogTable}[2]{%
-\begin{longtable}{|p{1.2cm}|p{7.2cm}|p{1.4cm}|p{2.8cm}|p{1.4cm}|}%
-\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{ID}&\color{white}\textbf{User Story}&\color{white}\textbf{Priorité}&\color{white}\textbf{Statut}&\color{white}\textbf{Points}\\\hline\endhead
-#1\hline\end{longtable}\caption{\textbf{#2}}}
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{longtable}{|>{\centering\arraybackslash}p{1.1cm}|p{6.8cm}|>{\centering\arraybackslash}p{1.6cm}|>{\centering\arraybackslash}p{2.1cm}|>{\centering\arraybackslash}p{1.2cm}|}
+\caption{\textbf{#2}}\\
+\hline
+\TableHeaderCell{ID} & \TableHeaderCell{User Story} & \TableHeaderCell{Priorité} & \TableHeaderCell{Statut} & \TableHeaderCell{Points} \\ \hline
+\endfirsthead
+\multicolumn{5}{r}{\textit{Suite de la page précédente}}\\ \hline
+\TableHeaderCell{ID} & \TableHeaderCell{User Story} & \TableHeaderCell{Priorité} & \TableHeaderCell{Statut} & \TableHeaderCell{Points} \\ \hline
+\endhead
+#1
+\end{longtable}
+\endgroup}
+
+% En-tête de tableau noir/blanc (cellcolor = fiable sur Overleaf)
+\newcommand{\TableHeaderCell}[1]{\cellcolor{black}\textcolor{white}{\textbf{#1}}}
 
 % ============================================================
 \begin{document}
@@ -844,23 +858,117 @@ Encadrant académique & Revue méthodologique \\\hline
 
 \section{Organisation fonctionnelle du produit}\label{sec:ch2-backlog}
 
-\subsection{Backlog Produit}
-\begin{longtable}{|p{1.1cm}|p{7.4cm}|p{1.5cm}|p{2.6cm}|}
-\hline\rowcolor[RGB]{220,0,0}\color{white}\textbf{ID}&\color{white}\textbf{User Story}&\color{white}\textbf{Priorité}&\color{white}\textbf{Sprint}\\\hline
-US-01 & Authentification JWT et MFA entreprise & Haute & Sprint 1 \\\hline
-US-02 & Bootstrap administrateur sécurisé & Haute & Sprint 1 \\\hline
-US-03 & Pipeline XML $\rightarrow$ Parquet & Haute & Sprint 2 \\\hline
-US-04 & Upload admin et registre bronze & Haute & Sprint 2 \\\hline
-US-05 & Dashboard exécutif et filtres globaux & Haute & Sprint 3 \\\hline
-US-06 & Sites, inventaire, assets, qualité & Haute & Sprint 3 \\\hline
-US-07 & Module Delta et remplacements & Moyenne & Sprint 3 \\\hline
-US-08 & Moteurs Guardian (4 engines) & Haute & Sprint 4 \\\hline
-US-09 & Anomalies, cartes risque, patterns & Moyenne & Sprint 4 \\\hline
-US-10 & Assistant IA contrôlé + RAG & Haute & Sprint 5 \\\hline
-US-11 & Docker, CI/CD, observabilité & Moyenne & Sprint 5 \\\hline
-\caption{\textbf{Product Backlog priorisé}}
-\label{tab:product-backlog}
+\subsection{Épics du produit}
+
+Le besoin global a été décomposé en huit axes fonctionnels (\textit{épics}), qui structurent l'ensemble du backlog produit et des sprints de réalisation.
+
+\begin{table}[H]\centering
+\caption{\textbf{Axes fonctionnels (Épics)}}
+\label{tab:epics}
+\renewcommand{\arraystretch}{1.3}
+\small
+\begin{tabular}{|>{\centering\arraybackslash}p{1.3cm}|p{5.8cm}|p{6.2cm}|}
+\hline
+\TableHeaderCell{Épic} & \TableHeaderCell{Intitulé} & \TableHeaderCell{Valeur métier} \\ \hline
+E1 & Sécurité et gestion des accès & Authentification web/mobile, rôles, conformité \\ \hline
+E2 & ETL et lac de données & Ingestion, transformation et stockage fiables \\ \hline
+E3 & Guardian et Data Science & Intégrité, anomalies, risques prédictifs \\ \hline
+E4 & Copilot IA hybride & Décision assistée : local, web et RAG \\ \hline
+E5 & Application web & Supervision et pilotage sur navigateur \\ \hline
+E6 & Dashboards Power BI & Cartographie réseau et rapports exécutifs \\ \hline
+E7 & Application mobile & Consultation et alertes en mobilité \\ \hline
+E8 & Industrialisation (DevOps) & Déploiement, CI/CD, observabilité \\ \hline
+\end{tabular}
+\end{table}
+
+\subsection{Backlog Produit priorisé}
+
+Le backlog produit consolide l'ensemble des récits utilisateur, rattachés à leur épic, priorisés selon l'échelle \textit{Essentiel / Important / Souhaitable} et estimés en points de complexité.
+
+{\small
+\renewcommand{\arraystretch}{1.22}
+\begin{longtable}{|>{\centering\arraybackslash}p{0.95cm}|>{\centering\arraybackslash}p{0.8cm}|p{6.2cm}|>{\centering\arraybackslash}p{1.7cm}|>{\centering\arraybackslash}p{0.75cm}|>{\centering\arraybackslash}p{1.35cm}|}
+\caption{\textbf{Backlog Produit priorisé — RAN Intelligence}}
+\label{tab:product-backlog}\\
+\hline
+\TableHeaderCell{ID} & \TableHeaderCell{Épic} & \TableHeaderCell{Récit utilisateur} & \TableHeaderCell{Prio.} & \TableHeaderCell{Pts} & \TableHeaderCell{Sprint} \\ \hline
+\endfirsthead
+\hline
+\TableHeaderCell{ID} & \TableHeaderCell{Épic} & \TableHeaderCell{Récit utilisateur} & \TableHeaderCell{Prio.} & \TableHeaderCell{Pts} & \TableHeaderCell{Sprint} \\ \hline
+\endhead
+\hline\multicolumn{6}{|r|}{\textit{Suite page suivante}}\\ \hline
+\endfoot
+\hline
+\multicolumn{4}{|r|}{\textbf{Total}} & \textbf{188} & \textbf{30} \\ \hline
+\endlastfoot
+US-01 & E1 & En tant que responsable, je veux m'authentifier via JWT et MFA, afin de sécuriser l'accès web. & Essentiel & 8 & S1 \\ \hline
+US-02 & E1 & En tant qu'administrateur, je veux un amorçage sécurisé, afin d'initialiser la plateforme. & Essentiel & 5 & S1 \\ \hline
+US-03 & E1 & En tant que responsable, je veux recevoir un OTP par e-mail/SMS, afin de valider une connexion sensible. & Essentiel & 5 & S1 \\ \hline
+US-04 & E1 & En tant qu'administrateur, je veux gérer les rôles admin/responsable, afin d'appliquer le moindre privilège. & Essentiel & 3 & S1 \\ \hline
+US-05 & E1 & En tant que responsable, je veux m'authentifier sur mobile, afin d'accéder en mobilité de façon sécurisée. & Important & 5 & S1 \\ \hline
+US-06 & E2 & En tant que système, je veux découvrir automatiquement les snapshots XML, afin d'ingérer sans saisie manuelle. & Essentiel & 8 & S2 \\ \hline
+US-07 & E2 & En tant que système, je veux parser le XML Nokia/Huawei, afin d'extraire sites et équipements. & Essentiel & 8 & S2 \\ \hline
+US-08 & E2 & En tant que système, je veux normaliser les données (ETL), afin de fiabiliser l'analyse. & Important & 5 & S2 \\ \hline
+US-09 & E2 & En tant que système, je veux stocker en Parquet et servir via DuckDB, afin d'optimiser les requêtes. & Essentiel & 8 & S2 \\ \hline
+US-10 & E3 & En tant que responsable, je veux vérifier l'intégrité d'un snapshot (Data Trust), afin de fiabiliser les analyses. & Essentiel & 8 & S3 \\ \hline
+US-11 & E3 & En tant que responsable, je veux détecter les anomalies (règles, z-score, forêt d'isolement), afin d'anticiper les incidents. & Essentiel & 8 & S3 \\ \hline
+US-12 & E3 & En tant que responsable, je veux analyser les changements inter-dates (delta), afin de tracer les remplacements. & Important & 5 & S3 \\ \hline
+US-13 & E3 & En tant que responsable, je veux des risques prédictifs J+1/J+3, afin de prioriser les interventions. & Important & 8 & S3 \\ \hline
+US-14 & E4 & En tant que responsable, je veux un Copilot IA par appels de fonctions, afin d'interroger mes données RAN. & Essentiel & 13 & S4 \\ \hline
+US-15 & E4 & En tant que responsable, je veux une recherche RAG (procédures Nokia/Huawei), afin d'obtenir des réponses sourcées. & Important & 8 & S4 \\ \hline
+US-16 & E4 & En tant que responsable, je veux une recherche web hybride, afin d'enrichir les réponses. & Important & 5 & S4 \\ \hline
+US-17 & E4 & En tant que responsable, je veux un mode 100\% local (Ollama), afin de préserver la confidentialité. & Souhaitable & 5 & S4 \\ \hline
+US-18 & E5 & En tant que responsable, je veux un tableau de bord exécutif avec filtres globaux, afin d'avoir une vue d'ensemble. & Essentiel & 8 & S5 \\ \hline
+US-19 & E5 & En tant que responsable, je veux consulter sites, inventaire et équipements, afin de superviser le patrimoine. & Essentiel & 8 & S5 \\ \hline
+US-20 & E5 & En tant que responsable, je veux le module delta et remplacements, afin d'identifier les changements matériels. & Important & 5 & S5 \\ \hline
+US-21 & E5 & En tant que responsable, je veux visualiser qualité et anomalies, afin de détecter les écarts de complétude. & Important & 5 & S5 \\ \hline
+US-22 & E5 & En tant que responsable, je veux exporter des rapports, afin de partager les analyses. & Souhaitable & 3 & S5 \\ \hline
+US-23 & E6 & En tant que responsable, je veux une cartographie réseau Power BI, afin de visualiser géographiquement le parc. & Important & 8 & S6 \\ \hline
+US-24 & E6 & En tant que responsable, je veux des rapports exécutifs Power BI au thème Ooredoo, afin de piloter la direction. & Important & 5 & S6 \\ \hline
+US-25 & E6 & En tant que système, je veux synchroniser les données vers Power BI, afin d'automatiser le rafraîchissement. & Souhaitable & 5 & S6 \\ \hline
+US-26 & E8 & En tant qu'équipe, je veux conteneuriser via Docker et automatiser le CI/CD, afin de déployer de façon reproductible. & Important & 5 & S6 \\ \hline
+US-27 & E7 & En tant que responsable, je veux consulter sites, KPI et anomalies sur mobile, afin de superviser en déplacement. & Essentiel & 8 & S7 \\ \hline
+US-28 & E7 & En tant que responsable, je veux recevoir des notifications push d'alertes, afin de réagir immédiatement. & Important & 5 & S7 \\ \hline
+US-29 & E7 & En tant que responsable, je veux utiliser le Copilot IA depuis le mobile, afin d'obtenir des réponses en mobilité. & Souhaitable & 5 & S7 \\ \hline
+US-30 & E8 & En tant qu'équipe, je veux l'observabilité (métriques, OpenTelemetry, Sentry), afin de surveiller la santé du système. & Souhaitable & 3 & S7 \\ \hline
 \end{longtable}
+}
+
+\subsection{Planification des sprints}\label{sec:ch2-planif}
+
+La réalisation est organisée en \textbf{sept sprints} de deux semaines : le \textbf{chapitre~3} couvre la chaîne data et IA (Sprints~1 à~4), le \textbf{chapitre~4} couvre les applications et la restitution (Sprints~5 à~7).
+
+\begin{table}[H]\centering
+\caption{\textbf{Planification globale des sprints}}
+\label{tab:planif-sprints}
+\renewcommand{\arraystretch}{1.3}
+\small
+\begin{tabular}{|>{\centering\arraybackslash}p{1.1cm}|>{\centering\arraybackslash}p{1.2cm}|p{4.8cm}|>{\centering\arraybackslash}p{1.9cm}|>{\centering\arraybackslash}p{1.9cm}|>{\centering\arraybackslash}p{0.85cm}|}
+\hline
+\TableHeaderCell{Sprint} & \TableHeaderCell{Ch.} & \TableHeaderCell{Objectif} & \TableHeaderCell{Récits} & \TableHeaderCell{Durée} & \TableHeaderCell{Pts} \\ \hline
+S1 & Ch.~3 & Socle technique et authentification (web + mobile) & US-01 à US-05 & 2 sem. & 26 \\ \hline
+S2 & Ch.~3 & ETL et lac de données (ingestion, transformation) & US-06 à US-09 & 2 sem. & 29 \\ \hline
+S3 & Ch.~3 & Guardian et Data Science (intégrité, anomalies) & US-10 à US-13 & 2 sem. & 29 \\ \hline
+S4 & Ch.~3 & Copilot IA hybride (outils RAN, RAG, web, local) & US-14 à US-17 & 2 sem. & 31 \\ \hline
+S5 & Ch.~4 & Application web (dashboard, supervision, delta) & US-18 à US-22 & 2 sem. & 29 \\ \hline
+S6 & Ch.~4 & Dashboards Power BI et conteneurisation & US-23 à US-26 & 2 sem. & 23 \\ \hline
+S7 & Ch.~4 & Application mobile et observabilité & US-27 à US-30 & 2 sem. & 21 \\ \hline
+\rowcolor{black!10}
+\textbf{Total} & -- & \multicolumn{2}{l|}{\textbf{7 sprints --- 30 récits --- 14 semaines}} & & \textbf{188} \\ \hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Synthèse des objectifs par sprint}\label{sec:ch2-planif-synthese}
+
+\begin{enumerate}[leftmargin=*,itemsep=3pt]
+    \item \textbf{Sprint 1 --- Socle et authentification} : JWT/MFA, OTP e-mail/SMS, amorçage administrateur, rôles admin/responsable, authentification mobile.
+    \item \textbf{Sprint 2 --- ETL et lac de données} : découverte et parsing XML Nokia/Huawei, normalisation, stockage Parquet et serving DuckDB.
+    \item \textbf{Sprint 3 --- Guardian et Data Science} : Data Trust, détection d'anomalies (z-score, forêt d'isolement), changements et risques prédictifs.
+    \item \textbf{Sprint 4 --- Copilot IA hybride} : agent par appels de fonctions, RAG, recherche web hybride et mode local Ollama.
+    \item \textbf{Sprint 5 --- Application web} : tableau de bord exécutif, supervision sites/inventaire, module delta et indicateurs de qualité.
+    \item \textbf{Sprint 6 --- Dashboards Power BI} : cartographie réseau, rapports exécutifs Ooredoo, synchronisation et Docker/CI-CD.
+    \item \textbf{Sprint 7 --- Application mobile} : consultation sites/KPI/anomalies, notifications push, Copilot mobile et observabilité.
+\end{enumerate}
 
 \section{Diagramme de classe général}\label{sec:ch2-classes}
 

@@ -107,8 +107,10 @@ def main() -> int:
         print("Inscription classique (email/mot de passe) : /register sans clé d'invitation.")
     else:
         AuthService()
+        admin_email = os.getenv("ADMIN_EMAIL", "hbenahmed2001@gmail.com")
+        admin_key = os.getenv("ADMIN_ACCESS_KEY", "RAN-ADMIN-MASTER-KEY")
         print("Reset OK — tous les comptes supprimés.")
-        print("Admin recréé : admin@ooredoo.ran / Admin@RAN2026! / RAN-ADMIN-MASTER-KEY")
+        print(f"Admin recréé : {admin_email} (mot de passe = ADMIN_PASSWORD dans .env.auth) / {admin_key}")
 
     return 0
 

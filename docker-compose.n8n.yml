@@ -1,0 +1,45 @@
+# RAN Intelligence — n8n local (premium stack)
+# Usage:
+#   copy .env.identity.example → .env.identity  (set RAN_API_TOKEN + passwords)
+#   docker compose -f docker-compose.n8n.yml up -d
+# UI: http://localhost:5678
+
+services:
+  n8n:
+    image: n8nio/n8n:1.76.1
+    container_name: ran-n8n
+    restart: unless-stopped
+    env_file:
+      - .env.identity
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: Africa/Tunis
+      TZ: Africa/Tunis
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-ran_admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-n8n_dev_change_me}
+      # Workflows: Authorization: Bearer {{$env.RAN_API_TOKEN}}
+      RAN_API_TOKEN: ${RAN_API_TOKEN:-}
+      # Backend on host (Windows/macOS Docker Desktop)
+      RAN_BACKEND_URL: ${RAN_BACKEND_URL:-http://host.docker.internal:8010}
+      # Optional SMTP for n8n email nodes (Mailtrap / corporate relay)
+      N8N_EMAIL_MODE: ${N8N_EMAIL_MODE:-smtp}
+      N8N_SMTP_HOST: ${N8N_SMTP_HOST:-live.smtp.mailtrap.io}
+      N8N_SMTP_PORT: ${N8N_SMTP_PORT:-587}
+      N8N_SMTP_USER: ${N8N_SMTP_USER:-}
+      N8N_SMTP_PASS: ${N8N_SMTP_PASS:-}
+      N8N_SMTP_SENDER: ${N8N_SMTP_SENDER:-noc@ran-intelligence.local}
+      N8N_SMTP_SSL: "false"
+      N8N_SMTP_STARTTLS: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ran_n8n_data:/home/node/.n8n
+
+volumes:
+  ran_n8n_data:

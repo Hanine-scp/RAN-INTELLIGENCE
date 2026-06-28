@@ -1,0 +1,235 @@
+{
+  "name": "RAN · Signup Access",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ran/signup-access",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-signup",
+      "name": "Webhook signup-access",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 360],
+      "webhookId": "ran-signup-access"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "access_requested",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "requested"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "access_approved",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "approved"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "access_rejected",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rejected"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-event",
+      "name": "Type événement",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [520, 360]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p1",
+              "name": "event",
+              "value": "={{ $json.body?.event ?? $json.event }}",
+              "type": "string"
+            },
+            {
+              "id": "p2",
+              "name": "user_id",
+              "value": "={{ $json.body?.user_id ?? $json.user_id }}",
+              "type": "number"
+            },
+            {
+              "id": "p3",
+              "name": "full_name",
+              "value": "={{ $json.body?.full_name ?? $json.full_name }}",
+              "type": "string"
+            },
+            {
+              "id": "p4",
+              "name": "email",
+              "value": "={{ $json.body?.email ?? $json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "p5",
+              "name": "phone",
+              "value": "={{ $json.body?.phone ?? $json.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "p6",
+              "name": "job_profile",
+              "value": "={{ $json.body?.job_profile ?? $json.job_profile }}",
+              "type": "string"
+            },
+            {
+              "id": "p7",
+              "name": "department",
+              "value": "={{ $json.body?.department ?? $json.department }}",
+              "type": "string"
+            },
+            {
+              "id": "p8",
+              "name": "employee_id",
+              "value": "={{ $json.body?.employee_id ?? $json.employee_id }}",
+              "type": "string"
+            },
+            {
+              "id": "p9",
+              "name": "admin_email",
+              "value": "={{ $json.body?.admin_email ?? $json.admin_email ?? $env.ADMIN_EMAIL }}",
+              "type": "string"
+            },
+            {
+              "id": "p10",
+              "name": "admin_panel_url",
+              "value": "={{ $json.body?.admin_panel_url ?? $json.admin_panel_url ?? 'http://localhost:3000/admin/users' }}",
+              "type": "string"
+            },
+            {
+              "id": "p11",
+              "name": "login_url",
+              "value": "={{ $json.body?.login_url ?? $json.login_url ?? 'http://localhost:3000/login' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalize-payload",
+      "name": "Normaliser payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [760, 360]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.RAN_SMTP_FROM || 'ran-noc@ooredoo.tn' }}",
+        "toEmail": "={{ $json.admin_email }}",
+        "subject": "=RAN Intelligence — Demande d'accès · {{ $json.full_name }}",
+        "emailFormat": "html",
+        "html": "=<h2>Nouvelle demande d'accès</h2><p><strong>{{ $json.full_name }}</strong> souhaite rejoindre RAN Intelligence.</p><ul><li>Email : {{ $json.email }}</li><li>Téléphone : {{ $json.phone }}</li><li>Profil : {{ $json.job_profile }}</li><li>Département : {{ $json.department || '—' }}</li><li>Matricule : {{ $json.employee_id || '—' }}</li></ul><p><a href=\"{{ $json.admin_panel_url }}\">Ouvrir Admin → Utilisateurs</a></p><p><em>Accepter ou refuser depuis la fiche utilisateur.</em></p>"
+      },
+      "id": "email-admin",
+      "name": "Email admin (demande)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1040, 180],
+      "notes": "Brancher credential SMTP (Mailtrap / Ooredoo). Le backend envoie déjà l'email — ce nœud sert de relais Teams/Slack ou doublon."
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.RAN_SMTP_FROM || 'ran-noc@ooredoo.tn' }}",
+        "toEmail": "={{ $json.email }}",
+        "subject": "=RAN Intelligence — Accès approuvé",
+        "emailFormat": "html",
+        "html": "=<p>Bonjour <strong>{{ $json.full_name }}</strong>,</p><p>Votre demande d'accès a été <strong>approuvée</strong>.</p><p><a href=\"{{ $json.login_url }}\">Se connecter à RAN Intelligence</a></p>"
+      },
+      "id": "email-user-approved",
+      "name": "Email user (approuvé)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1040, 360]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.RAN_SMTP_FROM || 'ran-noc@ooredoo.tn' }}",
+        "toEmail": "={{ $json.email }}",
+        "subject": "=RAN Intelligence — Demande non approuvée",
+        "emailFormat": "html",
+        "html": "=<p>Bonjour <strong>{{ $json.full_name }}</strong>,</p><p>Votre demande d'accès n'a pas été approuvée. Contactez votre administrateur réseau.</p>"
+      },
+      "id": "email-user-rejected",
+      "name": "Email user (refusé)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1040, 540]
+    },
+    {
+      "parameters": {
+        "content": "## RAN · Signup Access\n\n**Webhook** : `POST /webhook/ran/signup-access`\n\nÉvénements émis par le backend :\n- `access_requested` — inscription publique (/signup)\n- `access_approved` — admin clique « Accepter »\n- `access_rejected` — admin clique « Refuser »\n\n**Env (.env.auth)** :\n`N8N_ENABLED=true`\n`N8N_WEBHOOK_SIGNUP_ACCESS=http://localhost:5678/webhook/ran/signup-access`\n\n**Variables n8n** : `RAN_API_TOKEN`, `ADMIN_EMAIL`, `RAN_SMTP_FROM`\n\nBrancher **SMTP** sur les 3 nœuds Email (ou remplacer par Teams/Slack).",
+        "height": 320,
+        "width": 420
+      },
+      "id": "note-setup",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, 80]
+    }
+  ],
+  "connections": {
+    "Webhook signup-access": {
+      "main": [[{ "node": "Normaliser payload", "type": "main", "index": 0 }]]
+    },
+    "Normaliser payload": {
+      "main": [[{ "node": "Type événement", "type": "main", "index": 0 }]]
+    },
+    "Type événement": {
+      "main": [
+        [{ "node": "Email admin (demande)", "type": "main", "index": 0 }],
+        [{ "node": "Email user (approuvé)", "type": "main", "index": 0 }],
+        [{ "node": "Email user (refusé)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

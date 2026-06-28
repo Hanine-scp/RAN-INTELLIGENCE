@@ -1,0 +1,32 @@
+# SearXNG — configuration RAN Intelligence (recherche web auto-hébergée)
+# Le format JSON est requis pour l'intégration backend (web_search_providers.py).
+
+use_default_settings: true
+
+server:
+  # Remplacez ce secret par une valeur aléatoire en production.
+  secret_key: "change-me-ran-searxng-secret-key"
+  limiter: false
+  image_proxy: true
+
+search:
+  # IMPORTANT : "json" doit être présent pour l'API backend.
+  formats:
+    - html
+    - json
+  safe_search: 1
+  autocomplete: ""
+
+ui:
+  default_locale: fr
+
+# Moteurs activés (généralistes + techniques). Ajustez selon votre politique.
+engines:
+  - name: wikipedia
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: google
+    disabled: false

@@ -1,25 +1,39 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fafbfc;
-  --foreground: #475569;
+  --background: #f8fafc;
+  --foreground: #1e293b;
   --panel: #ffffff;
-  --panel-soft: #f8fafc;
+  --panel-soft: #f1f5f9;
   --border: #e2e8f0;
-  --accent: #16a085;
-  --accent-deep: #12856d;
-  --accent-glow: rgba(22, 160, 133, 0.1);
-  --brand-navy: #5a7389;
-  --brand-teal: #16a085;
-  --brand-royal: #0984e3;
-  --brand-sky: #74b9ff;
-  --brand-orange: #e67e22;
-  --brand-sage: #9db09e;
-  --brand-red: #d63031;
+  --accent: #0f766e;
+  --accent-deep: #0d5f58;
+  --accent-glow: rgba(15, 118, 110, 0.12);
+  --brand-navy: #1e293b;
+  --brand-teal: #0f766e;
+  --brand-teal-dark: #0d5f58;
+  --brand-red: #ed1c24;
+  --brand-red-dark: #dc2626;
+  --brand-purple: #1e293b;
+  --brand-orange: #d97706;
+  --brand-yellow: #d97706;
+  --brand-olive: #0f766e;
+  --brand-royal: #0891b2;
+  --brand-sage: #64748b;
   --muted: #64748b;
-  --premium-shadow: 0 8px 30px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(22, 160, 133, 0.04);
-  --premium-shadow-lg: 0 14px 40px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(22, 160, 133, 0.05);
-  --platform-table-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
+  --chart-1: #1e293b;
+  --chart-2: #ed1c24;
+  --chart-3: #0f766e;
+  --chart-4: #0891b2;
+  --chart-5: #475569;
+  --chart-6: #dc2626;
+  --pbi-navy: #1e293b;
+  --pbi-red: #ed1c24;
+  --pbi-teal: #0f766e;
+  --pbi-row-alt: #f8fafc;
+  --premium-shadow: 0 1px 3px rgba(30, 41, 59, 0.06), 0 4px 12px rgba(30, 41, 59, 0.04);
+  --premium-shadow-lg: 0 4px 16px rgba(30, 41, 59, 0.08), 0 8px 24px rgba(30, 41, 59, 0.06);
+  --platform-table-shadow: 0 1px 3px rgba(30, 41, 59, 0.06);
 }
 
 @theme inline {
@@ -28,29 +42,29 @@
   --font-sans: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
   --font-mono: "Consolas", "Courier New", monospace;
 
-  /* Premium remap — red scale → light slate / teal UI accents */
-  --color-red-50: #f8fafc;
-  --color-red-100: #eef8f5;
-  --color-red-200: #d5f0ea;
-  --color-red-300: #abdfd3;
-  --color-red-400: #16a085;
-  --color-red-500: #5a7389;
-  --color-red-600: #16a085;
-  --color-red-700: #12856d;
-  --color-red-800: #0e6b58;
-  --color-red-900: #475569;
+  /* Teal — accent Power BI */
+  --color-teal-50: #f0fdfa;
+  --color-teal-100: #ccfbf1;
+  --color-teal-200: #99f6e4;
+  --color-teal-300: #5eead4;
+  --color-teal-400: #2dd4bf;
+  --color-teal-500: #14b8a6;
+  --color-teal-600: #0f766e;
+  --color-teal-700: #0d5f58;
+  --color-teal-800: #1e293b;
+  --color-teal-900: #0f172a;
 
-  /* Teal scale — accent */
-  --color-teal-50: #eef8f5;
-  --color-teal-100: #d5f0ea;
-  --color-teal-200: #abdfd3;
-  --color-teal-300: #7ecec1;
-  --color-teal-400: #16a085;
-  --color-teal-500: #16a085;
-  --color-teal-600: #12856d;
-  --color-teal-700: #0e6b58;
-  --color-teal-800: #0a5143;
-  --color-teal-900: #06372e;
+  /* Rouge Ooredoo — KPI / alertes */
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-200: #fecaca;
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ed1c24;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+  --color-red-800: #991b1b;
+  --color-red-900: #7f1d1d;
 }
 
 body {
@@ -60,8 +74,8 @@ body {
 }
 
 ::selection {
-  background: #d5f0ea;
-  color: #0e6b58;
+  background: #e2e8f0;
+  color: #1e293b;
 }
 
 ::-webkit-scrollbar {
@@ -78,37 +92,49 @@ body {
   background: #94a3b8;
 }
 
+/* Nav horizontale — scroll souris/touch sans barre visible */
+.top-nav-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.top-nav-scroll::-webkit-scrollbar {
+  display: none;
+  height: 0;
+}
+
 /* ── Premium platform utilities ── */
 
 .platform-shell {
   position: relative;
   min-height: 100vh;
+  background: var(--background);
 }
 
 .premium-card {
-  border: 1px solid rgba(223, 230, 233, 0.95);
+  border: 1px solid var(--border);
   background: #ffffff;
   box-shadow: var(--premium-shadow);
-  border-radius: 1rem;
+  border-radius: 0.5rem;
 }
 
 .premium-card-red {
-  border: 1px solid rgba(22, 160, 133, 0.2);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(238, 248, 245, 0.92) 100%);
+  border: 1px solid var(--border);
+  background: #ffffff;
   box-shadow: var(--premium-shadow);
-  border-radius: 1rem;
+  border-radius: 0.5rem;
 }
 
 .text-brand-accent {
-  color: var(--accent);
+  color: var(--brand-red);
 }
 
 .bg-brand-soft {
-  background: rgba(22, 160, 133, 0.08);
+  background: rgba(237, 28, 36, 0.08);
 }
 
 .border-brand-soft {
-  border-color: rgba(22, 160, 133, 0.22);
+  border-color: rgba(237, 28, 36, 0.2);
 }
 
 .premium-glass {
@@ -126,49 +152,76 @@ body {
 }
 
 .premium-kpi-value {
-  background: linear-gradient(135deg, #16a085 0%, #0984e3 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--brand-red);
+  font-weight: 700;
 }
 
 .premium-divider-glow {
-  box-shadow: 0 0 24px rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 24px rgba(237, 28, 36, 0.12);
 }
 
 .platform-section-title {
-  color: #12856d;
-  letter-spacing: 0.12em;
+  color: var(--pbi-navy);
+  letter-spacing: 0.1em;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .platform-kpi-band {
-  background: linear-gradient(90deg, #ffffff 0%, #eef8f5 45%, #f0f9ff 100%);
-  color: #475569;
-  border-top: 1px solid #e2e8f0;
+  background: var(--pbi-navy);
+  color: #ffffff;
+  border-top: 1px solid var(--border);
 }
 
 .platform-surface {
   overflow: hidden;
   border: 1px solid var(--border);
   background: #ffffff;
-  border-radius: 1rem;
+  border-radius: 0.5rem;
   box-shadow: var(--platform-table-shadow);
 }
 
 .platform-surface-header {
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(to right, #f8fafc, #ffffff);
+  background: #ffffff;
 }
 
 .platform-surface-soft {
   border: 1px solid var(--border);
-  background: linear-gradient(to bottom, #ffffff, #f8fafc);
-  border-radius: 1rem;
+  background: #ffffff;
+  border-radius: 0.5rem;
   box-shadow: var(--platform-table-shadow);
 }
 
+.platform-surface-footer {
+  border-top: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.platform-table-head th {
+  background: var(--pbi-navy);
+  color: #ffffff;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-bottom: none;
+}
+
+.platform-table-row-even {
+  background: #ffffff;
+}
+
+.platform-table-row-odd {
+  background: var(--pbi-row-alt);
+}
+
+.platform-table-row:hover {
+  background: #f1f5f9;
+}
+
 .text-platform-navy {
-  color: #0e6b58;
+  color: var(--pbi-navy);
 }
 
 @keyframes ticker {

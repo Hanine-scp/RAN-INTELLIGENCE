@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -26,15 +26,15 @@ def main() -> int:
         return rc
 
     status = notification_service.status()
-    email_ok = status.get("email_ready", False)
-    sms_ok = status.get("sms_ready", False)
+    email_ok = status.get("email_otp_ready") or status.get("email_ready", False)
+    sms_ok = status.get("sms_otp_ready") or status.get("vonage_verify_ready") or status.get("sms_ready", False)
 
     print("\n--- Notifications ---")
-    print(f"  Email (SMTP) : {'OK' if email_ok else 'NON CONFIGURÉ'}")
-    print(f"  SMS (Twilio) : {'OK' if sms_ok else 'NON CONFIGURÉ'}")
+    print(f"  Email OTP (Mailtrap SMTP) : {'OK' if email_ok else 'NON CONFIGURÉ'}")
+    print(f"  SMS OTP (Vonage Verify)   : {'OK' if sms_ok else 'NON CONFIGURÉ'}")
 
     if not email_ok or not sms_ok:
-        print("\nComplétez .env.auth (SMTP_* + TWILIO_*) puis redémarrez l'API.")
+        print("\nComplétez .env.auth (MAILTRAP_API_TOKEN/SMTP_PASS + VONAGE_API_KEY/SECRET) puis redémarrez l'API.")
         print("Voir docs/AUTH_NOTIFICATIONS_SETUP.md")
 
     print("\n--- URLs de test ---")

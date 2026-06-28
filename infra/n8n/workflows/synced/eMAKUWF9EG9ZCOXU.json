@@ -1,0 +1,79 @@
+[
+  {
+    "id": "eMAKUWF9EG9ZCOXU",
+    "name": "RAN \u00b7 Guardian Engines",
+    "active": true,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "ran/guardian-run",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "wh-eMAKUWF9EG9ZCOXU",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "webhookId": "fb107a08-7fad-4051-ab34-92c43d1b872f"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.RAN_BACKEND_URL || 'http://host.docker.internal:8010' }}/guardian/run",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.RAN_API_TOKEN }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"snapshot_dates\": []}"
+        },
+        "id": "gr-run",
+        "name": "Guardian run",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          520,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Guardian run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]

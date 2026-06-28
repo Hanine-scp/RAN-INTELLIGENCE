@@ -57,7 +57,7 @@ L'objectif n'est pas un simple tableau de bord : c'est **Guardian Nexus AI** —
 | **IA & Risques** | Anomalies, cartes risque, patterns serial, clustering, rapport IA, assistant ChatGPT-like |
 | **Data Trust** | Hash SHA-256 par fichier XML, chaînage par date, vérification d'intégrité |
 | **Multi-vendor** | Nokia (production), Huawei (scaffold prêt) |
-| **Auth** | JWT, OTP email/SMS, clés d'accès, rôles admin/user, audit activité |
+| **Auth** | JWT, OTP email/SMS, clés d'accès, rôles admin/responsable, audit activité |
 | **i18n** | Interface Français / English |
 
 ---
@@ -546,35 +546,24 @@ Ou via API / console `/ops` :
 
 ## Structure du projet
 
+Organisation **frontend / backend / tests** — détail : [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) · commandes tests : [`tests/README.md`](tests/README.md).
+
 ```
 RAN-INTELLIGENCE/
-├── api/                    # FastAPI — routes, schemas, auth, middleware
-├── app/                    # Streamlit legacy (pages analytics)
-├── config/
-│   ├── settings.py         # RAW_DATA_PATH, chemins bronze/silver/gold
-│   └── env_loader.py       # Chargement .env.auth / .env.ai
-├── data/
-│   ├── bronze/             # snapshot_registry.csv
-│   └── lake/               # Parquet (gitignored si généré)
-├── docs/                   # Guides auth, big-data, rollout
-├── frontend/               # Next.js 16 app
-│   ├── app/                # Pages App Router
-│   ├── components/         # UI, charts, AI workspace
-│   └── lib/                # API client, auth, i18n, permissions
-├── pipeline/
-│   └── main_pipeline.py    # Pipeline XML → Parquet
-├── scripts/                # Utilitaires CLI
+├── frontend/               # Next.js 16 — UI Guardian Nexus AI
+├── backend/                # Index & doc backend (code Python à la racine)
+├── tests/                  # ← tous les tests (backend + frontend)
+│   ├── backend/            # pytest, fixtures, tools
+│   └── frontend/           # Vitest unit, E2E (planned)
+├── api/                    # FastAPI — routes, schemas, auth
 ├── src/
-│   ├── parsers/
-│   │   ├── nokia_parser.py # Parser Nokia production
-│   │   └── huawei_parser.py# Scaffold Huawei
-│   └── services/           # 25+ services métier
-├── docker-compose.yml
-├── docker-compose.auth.yml
-├── docker-compose.bigdata.yml
-├── Dockerfile.api
-├── requirements.txt
-└── .github/workflows/ci.yml
+│   ├── parsers/            # nokia_parser, huawei_parser, audit
+│   └── services/           # lake, AI, trust, search, …
+├── config/                 # settings, env_loader
+├── pipeline/               # XML → Parquet
+├── scripts/                # CLI (audit, ingest, registry)
+├── data/                   # lake, bronze, exports
+└── docs/
 ```
 
 ---
@@ -667,17 +656,21 @@ npm run dev
 
 Ouvrir : **http://localhost:3000**
 
-### Identifiants admin par défaut (dev)
+### Identifiants admin (dev)
 
-Configurés dans `.env.auth` :
+Définis dans `.env.auth` (`SEED_DEFAULT_ADMIN=true` au premier démarrage) :
 
+```env
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=*** (dans .env.auth uniquement)
+ADMIN_PHONE=+10000000000
+ADMIN_ACCESS_KEY=*** (dans .env.auth uniquement)
+ADMIN_BOOTSTRAP_KEY=*** (dans .env.auth uniquement)
+DEFAULT_SIGNUP_KEY=*** (dans .env.auth uniquement)
+TWILIO_FROM_NUMBER=+10000000000
 ```
-ADMIN_EMAIL=admin@ooredoo.ran
-ADMIN_PASSWORD=Admin@RAN2026!
-ADMIN_ACCESS_KEY=RAN-ADMIN-MASTER-KEY
-```
 
-> Changez ces valeurs avant tout déploiement production.
+OTP réels : `MAILTRAP_API_TOKEN` + `TWILIO_VERIFY_SERVICE_SID` — voir `docs/AUTH_NOTIFICATIONS_SETUP.md`.
 
 ---
 
@@ -687,7 +680,7 @@ ADMIN_ACCESS_KEY=RAN-ADMIN-MASTER-KEY
 |---------|-------------|
 | `config/settings.py` | `RAW_DATA_PATH` (défaut `C:\projects\DATA.XML`, surcharge via `DATA_XML_ROOT`) |
 | `.env.docker` | Chemins Docker, ports, URL API frontend |
-| `.env.auth` | JWT, PostgreSQL auth, SMTP, Twilio OTP |
+| `.env.auth` | JWT, admin seed, Mailtrap Live SMTP, Twilio Verify OTP |
 | `.env.ai` | OpenAI, Claude, `KNOWLEDGE_DATABASE_URL` |
 | `.env.bigdata` | MinIO, Spark, TimescaleDB, Redis |
 | `frontend/.env.local` | `NEXT_PUBLIC_API_BASE_URL` |

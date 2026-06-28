@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PremiumHubTabs, type PremiumHubTabItem } from "@/components/premium-hub-tabs";
+import { HubPageReportSection } from "@/components/hub-page-report-section";
 import { PredictionSection } from "@/components/prediction-section";
 import { SparesSection } from "@/components/spares-section";
 import { useAppContext } from "@/components/app-provider";
@@ -71,6 +72,7 @@ function ForesightPageLayoutInner() {
         activeTab={activeTab}
         onTabChange={selectTab}
       />
+      <HubPageReportSection hub="foresight" activeTab={activeTab} />
       <section aria-label="Foresight content">
         {activeTab === "spares" ? <SparesSection /> : <PredictionSection />}
       </section>

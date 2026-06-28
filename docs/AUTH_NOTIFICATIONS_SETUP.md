@@ -9,7 +9,7 @@ Ce guide explique comment activer l’envoi **réel** des codes OTP, clés d’a
 | Canal | Service | Usage |
 |-------|---------|--------|
 | **Email** | SMTP (Gmail, Outlook, serveur interne…) | Codes OTP, clés d’accès, mot de passe temporaire |
-| **SMS** | [Twilio](https://www.twilio.com) | Codes OTP, clés de session |
+| **SMS** | [Vonage Verify](https://developer.vonage.com/en/verify/overview) | Codes OTP (Twilio en fallback optionnel) |
 
 Sans configuration, le système reste en **mode secours** : les codes s’affichent dans l’interface uniquement si `AUTH_DEV_MODE=true` et que l’envoi a échoué.
 
@@ -19,7 +19,7 @@ Sans configuration, le système reste en **mode secours** : les codes s’affich
 
 - Python 3.11+ avec les dépendances du projet (`pip install -r requirements.txt`)
 - Compte email avec accès SMTP (ou relais SMTP Ooredoo)
-- Compte Twilio avec un numéro d’envoi SMS activé
+- Compte [Vonage](https://dashboard.nexmo.com/) avec API Key + Secret (Verify activé)
 - API et frontend démarrés localement ou sur serveur
 
 ---
@@ -37,35 +37,81 @@ copy .env.auth.example .env.auth
 
 Le fichier `.env.auth` est chargé automatiquement au démarrage de l’API (`api/main.py`).
 
-> **Ne commitez jamais** `.env.auth` (mots de passe, tokens Twilio).
+> **Ne commitez jamais** `.env.auth` (mots de passe, clés Vonage/Mailtrap).
 
 ### 3.2 Variables obligatoires — Auth de base
 
+Modèle identique à `.env.auth` / `.env.auth.example` :
+
 ```env
-AUTH_JWT_SECRET=une-cle-secrete-longue-et-unique
-AUTH_DEV_MODE=true
+AUTH_JWT_SECRET=change-me-in-production
+AUTH_DEV_MODE=false
 AUTH_NOTIFICATIONS_ENABLED=true
 AUTH_OTP_MINUTES=10
 
-ADMIN_EMAIL=admin@ooredoo.ran
-ADMIN_PASSWORD=Admin@RAN2026!
-ADMIN_PHONE=21600000000
+SEED_DEFAULT_ADMIN=true
+ADMIN_BOOTSTRAP_KEY=RAN-BOOTSTRAP-OOREDOO-2026
+
+ADMIN_EMAIL=hbenahmed2001@gmail.com
+ADMIN_PASSWORD=*** (dans .env.auth uniquement)
+ADMIN_PHONE=+21623669609
 ADMIN_ACCESS_KEY=RAN-ADMIN-MASTER-KEY
 DEFAULT_SIGNUP_KEY=RAN-USER-INVITE-2026
+
+APP_FRONTEND_URL=http://localhost:3000
+APP_WEBOTP_DOMAIN=localhost
+
+MAILTRAP_API_TOKEN=
+SMTP_HOST=live.smtp.mailtrap.io
+SMTP_PORT=587
+SMTP_USER=api
+SMTP_PASS=
+SMTP_FROM=RAN Intelligence <noreply@votre-domaine-verifie.com>
+SMTP_USE_TLS=true
+
+SMS_PROVIDER=vonage
+VONAGE_API_KEY=CHANGE_ME
+VONAGE_API_SECRET=CHANGE_ME
+VONAGE_BRAND=RANIntel
+VONAGE_CODE_LENGTH=6
+
+NOTIFY_BRAND_NAME=RAN Intelligence · Ooredoo
+AUTH_OTP_RESEND_SECONDS=59
+AUTH_OTP_MAX_PER_HOUR=5
 ```
 
 | Variable | Description |
 |----------|-------------|
-| `AUTH_NOTIFICATIONS_ENABLED` | `true` pour activer email + SMS |
-| `AUTH_DEV_MODE` | `true` = affiche les OTP à l’écran si l’envoi échoue |
-| `AUTH_OTP_MINUTES` | Durée de validité des codes (défaut : 10 min) |
-| `DEFAULT_SIGNUP_KEY` | Clé d’invitation pour `/signup` |
+| `ADMIN_EMAIL` | Email admin seed (`hbenahmed2001@gmail.com`) |
+| `ADMIN_PHONE` | Téléphone admin E.164 (`+21623669609`) |
+| `VONAGE_BRAND` | Nom expéditeur SMS (max **18 caractères**, ex. `RANIntel`) |
+| `MAILTRAP_API_TOKEN` | Token Mailtrap Live → recopié dans `SMTP_PASS` si vide |
 
----
+## 4. Configuration Email (Mailtrap Live — recommandé)
 
-## 4. Configuration Email (SMTP)
+### 4.1 Mailtrap Live SMTP
 
-### 4.1 Variables
+1. [mailtrap.io](https://mailtrap.io) → **Email Sending** → vérifier un **domaine d'envoi**
+2. **Sending Domains → votre domaine → Integrations → SMTP**
+3. **Settings → API Tokens** → créer un token Admin (`mt_...`)
+
+```env
+AUTH_DEV_MODE=false
+AUTH_NOTIFICATIONS_ENABLED=true
+
+MAILTRAP_API_TOKEN=mt_votre_token
+SMTP_HOST=live.smtp.mailtrap.io
+SMTP_PORT=587
+SMTP_USER=api
+SMTP_PASS=mt_votre_token
+SMTP_FROM=RAN Intelligence <noreply@votre-domaine-verifie.com>
+SMTP_USE_TLS=true
+NOTIFY_BRAND_NAME=RAN Intelligence · Ooredoo
+```
+
+> `MAILTRAP_API_TOKEN` est copié automatiquement vers `SMTP_PASS` si celui-ci est vide (`config/env_loader.py`).
+
+### 4.2 Gmail / Outlook / SMTP interne
 
 ```env
 SMTP_HOST=smtp.gmail.com
@@ -74,10 +120,9 @@ SMTP_USER=votre-email@gmail.com
 SMTP_PASSWORD=mot-de-passe-application
 SMTP_FROM=RAN Intelligence <votre-email@gmail.com>
 SMTP_USE_TLS=true
-NOTIFY_BRAND_NAME=RAN Intelligence · Ooredoo
 ```
 
-### 4.2 Gmail (recommandé en dev)
+### 4.3 Gmail (dev rapide)
 
 1. Activer la **validation en 2 étapes** sur le compte Google.
 2. Aller dans **Compte Google → Sécurité → Mots de passe des applications**.
@@ -119,26 +164,39 @@ SMTP_USE_TLS=true
 
 ---
 
-## 5. Configuration SMS (Twilio)
+## 5. Configuration SMS (Vonage Verify)
 
-### 5.1 Créer un compte Twilio
+### 5.1 Créer un compte Vonage
 
-1. Inscription sur [twilio.com](https://www.twilio.com/try-twilio).
-2. Console → **Account Info** : copier `Account SID` et `Auth Token`.
-3. **Phone Numbers → Buy a number** : choisir un numéro capable d’envoyer des SMS.
-4. Pour la Tunisie (+216), vérifier que Twilio supporte l’envoi vers ce pays (compte vérifié / crédits).
+1. Inscription sur [dashboard.nexmo.com](https://dashboard.nexmo.com/).
+2. **Settings → API credentials** : copier `API Key` et `API Secret`.
+3. Activer **Verify** sur le compte (crédits requis pour l’envoi SMS).
+4. Pour la Tunisie (+216), tester la livraison avec un numéro réel.
 
 ### 5.2 Variables
 
 ```env
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_FROM_NUMBER=+1234567890
+SMS_PROVIDER=vonage
+VONAGE_API_KEY=xxxxxxxx
+VONAGE_API_SECRET=xxxxxxxx
+VONAGE_BRAND=RANIntel
+VONAGE_CODE_LENGTH=6
 ```
 
-Le numéro `TWILIO_FROM_NUMBER` doit être au format **E.164** (ex. `+14155552671`).
+- `VONAGE_BRAND` : max **18 caractères** (éviter `RAN Intelligence · Ooredoo`).
+- L’API Verify v2 attend le numéro **sans `+`** (ex. `21623669609`) — normalisé automatiquement côté backend.
 
-### 5.3 Format des numéros utilisateurs
+### 5.3 Twilio (fallback optionnel)
+
+Si `SMS_PROVIDER=twilio` ou si Vonage n’est pas configuré, Twilio Verify reste supporté :
+
+```env
+TWILIO_ACCOUNT_SID=ACxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxx
+TWILIO_VERIFY_SERVICE_SID=VAxxxxxxxx
+```
+
+### 5.4 Format des numéros utilisateurs
 
 À l’inscription, saisir un numéro tunisien valide :
 
@@ -207,13 +265,18 @@ Réponse attendue :
   "data": {
     "enabled": true,
     "email_ready": true,
-    "sms_ready": true
+    "email_otp_ready": true,
+    "sms_ready": true,
+    "sms_otp_ready": true,
+    "sms_provider": "vonage",
+    "vonage_verify_ready": true,
+    "twilio_verify_ready": false
   }
 }
 ```
 
-- `email_ready: false` → vérifier `SMTP_*` et `AUTH_NOTIFICATIONS_ENABLED`
-- `sms_ready: false` → vérifier `TWILIO_*`
+- `email_ready: false` → remplir `MAILTRAP_API_TOKEN` / `SMTP_PASS` + domaine vérifié dans `SMTP_FROM`
+- `vonage_verify_ready: false` → remplir `VONAGE_API_KEY`, `VONAGE_API_SECRET`, `SMS_PROVIDER=vonage`
 
 ### 8.2 Test Sign Up complet
 
@@ -252,9 +315,9 @@ Les **admins** ne reçoivent pas de clé de session rotative par SMS.
 
 ## 10. Comptes par défaut (développement)
 
-| Rôle | Email | Mot de passe | Clé |
-|------|-------|--------------|-----|
-| Admin | `admin@ooredoo.ran` | `Admin@RAN2026!` | `RAN-ADMIN-MASTER-KEY` |
+| Rôle | Email | Téléphone | Clé |
+|------|-------|-----------|-----|
+| Admin | `hbenahmed2001@gmail.com` | `+21623669609` | `RAN-ADMIN-MASTER-KEY` |
 | Sign Up | — | — | `RAN-USER-INVITE-2026` |
 
 ---
@@ -271,7 +334,14 @@ Les **admins** ne reçoivent pas de clé de session rotative par SMS.
 - Utiliser un **mot de passe d’application**, pas le mot de passe du compte.
 - Vérifier `SMTP_USER` = adresse Gmail exacte.
 
-### SMS Twilio non reçu
+### SMS Vonage non reçu
+
+- Vérifier les crédits Vonage (dashboard → Billing).
+- Vérifier `VONAGE_API_KEY` / `VONAGE_API_SECRET` et `SMS_PROVIDER=vonage`.
+- `VONAGE_BRAND` max 18 caractères (`RANIntel`).
+- Vérifier le format du numéro utilisateur (8 chiffres minimum, converti en E.164).
+
+### SMS Twilio (fallback) non reçu
 
 - Vérifier les crédits Twilio (console → Billing).
 - Vérifier que le pays +216 est autorisé sur le compte.

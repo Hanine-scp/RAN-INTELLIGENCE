@@ -6,6 +6,7 @@ type TableSortIconsProps = {
   onAsc: () => void;
   onDesc: () => void;
   columnLabel?: string;
+  inverted?: boolean;
 };
 
 function SortTriangle({
@@ -13,11 +14,13 @@ function SortTriangle({
   active,
   onClick,
   columnLabel,
+  inverted = false,
 }: {
   direction: "asc" | "desc";
   active: boolean;
   onClick: () => void;
   columnLabel?: string;
+  inverted?: boolean;
 }) {
   const label =
     direction === "asc"
@@ -29,11 +32,21 @@ function SortTriangle({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm transition-colors hover:bg-slate-100/80"
+      className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm transition-colors ${
+        inverted ? "hover:bg-white/15" : "hover:bg-slate-100/80"
+      }`}
     >
       <svg
         viewBox="0 0 10 6"
-        className={`h-2 w-2.5 ${active ? "text-slate-600" : "text-slate-400 hover:text-slate-500"}`}
+        className={`h-2 w-2.5 ${
+          active
+            ? inverted
+              ? "text-white"
+              : "text-slate-600"
+            : inverted
+              ? "text-white/55 hover:text-white/80"
+              : "text-slate-400 hover:text-slate-500"
+        }`}
         aria-hidden="true"
       >
         {direction === "asc" ? (
@@ -46,7 +59,14 @@ function SortTriangle({
   );
 }
 
-export function TableSortIcons({ active = false, direction = "asc", onAsc, onDesc, columnLabel }: TableSortIconsProps) {
+export function TableSortIcons({
+  active = false,
+  direction = "asc",
+  onAsc,
+  onDesc,
+  columnLabel,
+  inverted = false,
+}: TableSortIconsProps) {
   return (
     <span className="inline-flex shrink-0 items-center gap-0.5" role="group" aria-label={`Sort controls for ${columnLabel ?? "column"}`}>
       <SortTriangle
@@ -54,12 +74,14 @@ export function TableSortIcons({ active = false, direction = "asc", onAsc, onDes
         active={active && direction === "asc"}
         onClick={onAsc}
         columnLabel={columnLabel}
+        inverted={inverted}
       />
       <SortTriangle
         direction="desc"
         active={active && direction === "desc"}
         onClick={onDesc}
         columnLabel={columnLabel}
+        inverted={inverted}
       />
     </span>
   );

@@ -164,7 +164,7 @@ export function openHomeHubReportPdf(
   const aiText = aiInsight?.message ? cleanAiReportMessage(aiInsight.message) : "";
   const m = report.metrics;
   const riskScore = report.risk_index ?? 0;
-  const riskColor = riskScore >= 70 ? "#dc2626" : riskScore >= 40 ? "#ea580c" : "#0d9488";
+  const riskColor = riskScore >= 70 ? "#dc2626" : riskScore >= 40 ? "#ea580c" : "#64748b";
 
   const findingsHtml = (report.critical_findings ?? [])
     .map((item) => `<div class="finding"><strong>${escapeHtml(item.severity.toUpperCase())}</strong> ${escapeHtml(item[lang])}</div>`)
@@ -204,8 +204,8 @@ export function openHomeHubReportPdf(
 <style>
   @page { size: A4; margin: 14mm; }
   body { font-family: Segoe UI, Arial, sans-serif; color: #0f172a; margin: 0; padding: 32px; max-width: 820px; }
-  h1 { font-size: 22px; color: #0f766e; margin: 0 0 4px; }
-  h2 { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; color: #0d9488; margin: 24px 0 10px; }
+  h1 { font-size: 22px; color: #475569; margin: 0 0 4px; }
+  h2 { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; color: #64748b; margin: 24px 0 10px; }
   h3 { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #475569; margin: 16px 0 8px; }
   .meta { color: #64748b; font-size: 12px; margin-bottom: 16px; }
   .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0; }
@@ -216,7 +216,7 @@ export function openHomeHubReportPdf(
   .risk { display: inline-block; padding: 4px 10px; border-radius: 999px; background: ${riskColor}15; color: ${riskColor}; font-weight: 700; font-size: 11px; }
   .finding { padding: 8px 10px; border-radius: 8px; border: 1px solid #fde68a; background: #fffbeb; margin-bottom: 6px; font-size: 11px; }
   .decision { display: flex; gap: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; margin-bottom: 6px; }
-  .priority { width: 28px; height: 28px; border-radius: 6px; background: #0d9488; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+  .priority { width: 28px; height: 28px; border-radius: 6px; background: #64748b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
   .cat { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #94a3b8; }
   .decision p { margin: 2px 0 0; font-size: 11px; }
   .insight-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

@@ -8,9 +8,9 @@ import {
   InvestigationStatCard,
 } from "@/components/investigation-panel";
 import type { AssistantInsightResponse } from "@/lib/api";
-import { DELTA_COLORS } from "@/lib/chart-theme";
+import { DELTA_COLORS, CHART_PRIMARY, CHART_PRO } from "@/lib/chart-theme";
 import type { DeltaPageReport } from "@/lib/delta-report-data";
-import { getDeltaReportKpis, getDeltaReportTables } from "@/lib/delta-report-data";
+import { buildDeltaLocalAiMarkdown, getDeltaReportKpis, getDeltaReportTables } from "@/lib/delta-report-data";
 import { cleanAiReportMessage } from "@/lib/import-report-export";
 import { columnLabel, t, type Locale } from "@/lib/i18n";
 
@@ -22,6 +22,7 @@ type DeltaAiReportModalProps = {
   error?: string;
   report: DeltaPageReport | null;
   aiInsight: AssistantInsightResponse | null;
+  nocQuery?: string;
   onDownloadPdf: () => void;
   onDownloadText: () => void;
 };
@@ -45,13 +46,16 @@ function renderRichText(text: string) {
 function AiMarkdownBody({ content }: { content: string }) {
   const blocks = content.split("\n\n");
   return (
-    <div className="space-y-3 text-sm leading-relaxed text-slate-700">
+    <div className="space-y-4 text-sm leading-relaxed text-[#475569]">
       {blocks.map((block, i) => {
         const trimmed = block.trim();
         if (!trimmed) return null;
         if (trimmed.startsWith("## ")) {
           return (
-            <h4 key={i} className="border-b border-teal-100 pb-1 text-xs font-bold uppercase tracking-[0.14em] text-teal-800">
+            <h4
+              key={i}
+              className="border-b border-[#E8EDF2] pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#64748B]"
+            >
               {trimmed.replace(/^##\s*/, "")}
             </h4>
           );
@@ -59,15 +63,18 @@ function AiMarkdownBody({ content }: { content: string }) {
         const lines = trimmed.split("\n");
         if (lines.every((line) => /^[-·*]\s/.test(line))) {
           return (
-            <ul key={i} className="list-inside list-disc space-y-1">
+            <ul key={i} className="space-y-1.5">
               {lines.map((line, j) => (
-                <li key={j}>{renderRichText(line.replace(/^[-·*]\s*/, ""))}</li>
+                <li key={j} className="flex gap-2">
+                  <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-[#64748B]" />
+                  <span>{renderRichText(line.replace(/^[-·*]\s*/, ""))}</span>
+                </li>
               ))}
             </ul>
           );
         }
         return (
-          <p key={i} className="whitespace-pre-wrap">
+          <p key={i} className="whitespace-pre-wrap text-[#2C3E50]">
             {renderRichText(trimmed)}
           </p>
         );
@@ -144,14 +151,21 @@ export function DeltaAiReportModal({
   error,
   report,
   aiInsight,
+  nocQuery = "",
   onDownloadPdf,
   onDownloadText,
 }: DeltaAiReportModalProps) {
   const fr = language === "Français";
-  const aiMessage = useMemo(() => (aiInsight?.message ? cleanAiReportMessage(aiInsight.message) : ""), [aiInsight?.message]);
+  const aiMessage = useMemo(() => {
+    const cleaned = aiInsight?.message ? cleanAiReportMessage(aiInsight.message) : "";
+    if (cleaned) return cleaned;
+    if (report?.mode === "ai") return buildDeltaLocalAiMarkdown(fr, report, nocQuery);
+    return "";
+  }, [aiInsight?.message, fr, nocQuery, report]);
 
   const kpis = report ? getDeltaReportKpis(report, fr) : [];
   const tables = report ? getDeltaReportTables(report, fr) : [];
+  const showAiBlock = report?.mode === "ai" && (loading || aiMessage);
 
   return (
     <InvestigationPanel
@@ -174,7 +188,8 @@ export function DeltaAiReportModal({
             <button
               type="button"
               onClick={onDownloadPdf}
-              className="rounded-lg bg-teal-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-teal-700"
+              className="rounded-lg px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-95"
+              style={{ background: CHART_PRIMARY }}
             >
               {t(language, "delta_report_download_pdf")}
             </button>
@@ -195,26 +210,6 @@ export function DeltaAiReportModal({
             </div>
           ) : null}
 
-          {report.mode === "ai" && (loading || aiMessage) ? (
-            <InvestigationSection
-              title={t(language, "delta_report_ai_analysis")}
-              className="border-teal-200/80 bg-gradient-to-br from-white to-teal-50/20"
-            >
-              {loading && !aiMessage ? (
-                <p className="text-sm text-slate-500">{t(language, "delta_report_ai_pending")}</p>
-              ) : aiMessage ? (
-                <AiMarkdownBody content={aiMessage} />
-              ) : (
-                <p className="text-sm text-slate-500">{t(language, "delta_report_ai_unavailable")}</p>
-              )}
-              {aiInsight?.ai_model ? (
-                <p className="mt-3 text-[10px] text-slate-400">
-                  {aiInsight.ai_engine ?? "AI"} · {aiInsight.ai_model}
-                </p>
-              ) : null}
-            </InvestigationSection>
-          ) : null}
-
           <InvestigationSection title={t(language, "delta_report_page_content")}>
             <p className="text-sm text-slate-600">{t(language, "delta_report_page_content_hint")}</p>
           </InvestigationSection>
@@ -228,7 +223,7 @@ export function DeltaAiReportModal({
                 framed={false}
                 forceDualAxis
                 bars={[
-                  { key: "ancien", color: DELTA_COLORS.afterLight },
+                  { key: "ancien", color: DELTA_COLORS.before },
                   { key: "nouveau", color: DELTA_COLORS.after },
                 ]}
               />
@@ -276,10 +271,35 @@ export function DeltaAiReportModal({
                 xKey="metrique"
                 height={170}
                 framed={false}
-                bars={[{ key: "impact", color: "#0f766e" }]}
+                bars={[{ key: "impact", color: CHART_PRIMARY }]}
               />
             </InvestigationSection>
           </section>
+
+          {showAiBlock ? (
+            <InvestigationSection title={t(language, "delta_report_ai_analysis")}>
+              <div className={`${CHART_PRO.card} space-y-4`}>
+                {nocQuery.trim() ? (
+                  <p className={`${CHART_PRO.cardTitle} normal-case tracking-normal text-[#64748B]`}>
+                    {fr ? "Requête NOC" : "NOC query"} ·{" "}
+                    <span className="font-medium normal-case text-[#2C3E50]">{nocQuery.trim()}</span>
+                  </p>
+                ) : null}
+                {loading && !aiMessage ? (
+                  <p className="text-sm text-[#94A3B8]">{t(language, "delta_report_ai_pending")}</p>
+                ) : aiMessage ? (
+                  <AiMarkdownBody content={aiMessage} />
+                ) : (
+                  <p className="text-sm text-[#94A3B8]">{t(language, "delta_report_ai_unavailable")}</p>
+                )}
+                {aiInsight?.ai_model ? (
+                  <p className="text-[10px] text-[#94A3B8]">
+                    {aiInsight.ai_engine ?? "AI"} · {aiInsight.ai_model}
+                  </p>
+                ) : null}
+              </div>
+            </InvestigationSection>
+          ) : null}
 
           {tables.map((table) => (
             <ReportTable

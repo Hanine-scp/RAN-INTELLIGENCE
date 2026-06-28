@@ -1,0 +1,124 @@
+[
+  {
+    "id": "CuiSO1RRYCJT0m4Y",
+    "name": "RAN \u00b7 Post-Ingestion",
+    "active": true,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "ran/post-ingest",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "wh-CuiSO1RRYCJT0m4Y",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "webhookId": "480e6a35-59ad-45ed-85c7-a86ac43e3c4c"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.RAN_BACKEND_URL || 'http://host.docker.internal:8010' }}/guardian/run",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.RAN_API_TOKEN }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"snapshot_dates\": []}"
+        },
+        "id": "pi-guardian",
+        "name": "Guardian run",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          520,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.RAN_BACKEND_URL || 'http://host.docker.internal:8010' }}/integrations/powerbi/sync",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.RAN_API_TOKEN }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "pi-pbi",
+        "name": "Power BI sync",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          800,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Guardian run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Guardian run": {
+        "main": [
+          [
+            {
+              "node": "Power BI sync",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]

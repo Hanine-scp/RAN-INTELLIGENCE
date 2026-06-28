@@ -3,7 +3,7 @@ export type AuthUser = {
   email: string;
   phone: string;
   full_name: string;
-  role: "admin" | "user";
+  role: "admin" | "responsable";
   job_profile: string;
   permissions: string[];
   email_verified: boolean;
@@ -18,6 +18,7 @@ export type AuthSession = {
   expires_in: number;
   user: AuthUser;
   session_access_key?: string;
+  must_change_password?: boolean;
   message?: string;
   notifications?: { email?: boolean; sms?: boolean; email_otp?: boolean; sms_otp?: boolean; welcome_email?: boolean };
 };

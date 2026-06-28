@@ -1,7 +1,12 @@
 "use client";
 
-import { GuardianPageLayout } from "@/components/guardian-page-layout";
+import { Suspense } from "react";
+import GuardianRedirect from "./redirect";
 
 export default function GuardianPage() {
-  return <GuardianPageLayout />;
+  return (
+    <Suspense fallback={null}>
+      <GuardianRedirect />
+    </Suspense>
+  );
 }

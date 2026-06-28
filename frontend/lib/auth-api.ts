@@ -34,6 +34,13 @@ async function publicPost<T>(path: string, payload: unknown): Promise<T> {
   return readEnvelope<T>(response, path);
 }
 
+export function getIntegrationAuthConfig() {
+  return publicGet<{
+    provider: string;
+    public_signup: boolean;
+  }>("/integrations/auth/config");
+}
+
 export function getBootstrapStatus() {
   return publicGet<{
     admin_exists: boolean;

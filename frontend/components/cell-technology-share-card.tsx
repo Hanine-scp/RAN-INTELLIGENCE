@@ -75,7 +75,7 @@ export function CellTechnologyShareCard({ rows, language }: CellTechnologyShareC
   }, [rows]);
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+    <article className="rounded-sm border border-[#E8EDF2] bg-white p-4 shadow-none">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#2C3E50]">

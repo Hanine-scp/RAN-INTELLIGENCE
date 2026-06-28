@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     phone TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    role TEXT NOT NULL CHECK(role IN ('admin', 'responsable')),
     job_profile TEXT NOT NULL DEFAULT '',
     personal_access_key_hash TEXT,
     email_verified INTEGER NOT NULL DEFAULT 0,
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS users (
     phone TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    role TEXT NOT NULL CHECK(role IN ('admin', 'responsable')),
     job_profile TEXT NOT NULL DEFAULT '',
     personal_access_key_hash TEXT,
     email_verified INTEGER NOT NULL DEFAULT 0,
@@ -372,6 +372,15 @@ def _ensure_user_columns(conn: AuthDbConnection) -> None:
         "employee_id": "ALTER TABLE users ADD COLUMN employee_id TEXT NOT NULL DEFAULT ''",
         "created_by_admin_id": "ALTER TABLE users ADD COLUMN created_by_admin_id INTEGER",
         "recovery_email": "ALTER TABLE users ADD COLUMN recovery_email TEXT NOT NULL DEFAULT ''",
+        "failed_login_attempts": "ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+        "login_security_required": "ALTER TABLE users ADD COLUMN login_security_required INTEGER NOT NULL DEFAULT 0",
+        "must_change_password": "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
+        "last_failed_login_at": "ALTER TABLE users ADD COLUMN last_failed_login_at TEXT",
+        "allowed_regions": "ALTER TABLE users ADD COLUMN allowed_regions TEXT NOT NULL DEFAULT 'National'",
+        "allowed_vendors": "ALTER TABLE users ADD COLUMN allowed_vendors TEXT NOT NULL DEFAULT 'nokia,huawei'",
+        "last_login_ip": "ALTER TABLE users ADD COLUMN last_login_ip TEXT",
+        "last_login_user_agent": "ALTER TABLE users ADD COLUMN last_login_user_agent TEXT",
+        "signup_status": "ALTER TABLE users ADD COLUMN signup_status TEXT NOT NULL DEFAULT ''",
     }
     for column, statement in migrations.items():
         if column in existing:

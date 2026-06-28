@@ -16,11 +16,14 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.access_middleware import AccessControlMiddleware
 from api.activity_middleware import PlatformActivityMiddleware
 from api.performance_middleware import PerformanceMiddleware
 from api.rate_limit import rate_limiter
 from api.auth_routes import router as auth_router
+from api.integration_routes import router as integration_router
 from api.dependencies import get_current_user, require_admin
+from src.services.auth_service import AuthUser, auth_service
 from api.schemas import (
     AnomalyPayload,
     AssetDistributionV2Payload,
@@ -51,7 +54,6 @@ from api.schemas import (
 )
 from config.settings import RAW_DATA_PATH
 from pipeline.main_pipeline import delete_snapshots, process_uploaded_snapshot
-from src.services.auth_service import AuthUser
 from src.services.cache_service import cache_service
 from src.services.data_service import FilterContext, data_service, get_query_observability, lake_ready
 from src.services.feature_flags import feature_flags
@@ -82,6 +84,8 @@ from src.services.web_search_service import web_search_service
 app = FastAPI(title="RAN Guardian Copilot API", version="2.0.0")
 init_otel(app)
 app.include_router(auth_router)
+app.include_router(integration_router)
+app.add_middleware(AccessControlMiddleware)
 app.add_middleware(PlatformActivityMiddleware)
 _XML_ROOT = Path(os.getenv("DATA_XML_ROOT", str(RAW_DATA_PATH)))
 
@@ -96,7 +100,13 @@ app.add_middleware(
 app.add_middleware(PerformanceMiddleware)
 
 
-def _ctx(payload: FilterPayload) -> FilterContext:
+def _ctx(payload: FilterPayload, user: AuthUser) -> FilterContext:
+    vendor = payload.vendor
+    if user.role == "responsable":
+        try:
+            vendor = auth_service.enforce_vendor_scope(user, vendor)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
     return FilterContext.from_inputs(
         selected_dates=payload.selected_dates,
         selected_files=payload.selected_files,
@@ -111,8 +121,16 @@ def _ctx(payload: FilterPayload) -> FilterContext:
         smart_duplicates=payload.smart_duplicates,
         smart_critical_quality=payload.smart_critical_quality,
         language=payload.language,
-        vendor=payload.vendor,
+        vendor=vendor,
     )
+
+
+async def _cached_in_thread(cache_key: str, producer, *, ttl: int):
+    return await asyncio.to_thread(cache_service.get_or_set, cache_key, producer, ttl)
+
+
+async def _sync_in_thread(fn, /, *args, **kwargs):
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 def _validate_snapshot_date(snapshot_date: str) -> str:
@@ -258,20 +276,20 @@ async def process_snapshots(payload: ProcessSnapshotsPayload, _: AuthUser = Depe
 
 
 @app.post("/filters/options")
-def filter_options(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+async def filter_options(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
     cache_key = cache_service.make_key(
         "filters_options",
         {"vendor": ctx.vendor, "dates": ctx.selected_dates, "files": ctx.selected_files},
     )
     ttl = int(os.getenv("CACHE_FILTER_OPTIONS_TTL_SECONDS", "180"))
-    data = cache_service.get_or_set(cache_key, lambda: data_service.get_filter_options(ctx), ttl=ttl)
+    data = await _cached_in_thread(cache_key, lambda: data_service.get_filter_options(ctx), ttl=ttl)
     return {"data": data}
 
 
 @app.post("/dashboard")
-def dashboard(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+async def dashboard(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
     cache_key = cache_service.make_key(
         "dashboard",
         {
@@ -286,83 +304,91 @@ def dashboard(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -
         },
     )
     ttl = int(os.getenv("CACHE_DASHBOARD_TTL_SECONDS", "60"))
-    data = cache_service.get_or_set(cache_key, lambda: data_service.get_dashboard(ctx), ttl=ttl)
+    data = await _cached_in_thread(cache_key, lambda: data_service.get_dashboard(ctx), ttl=ttl)
     return {"data": data}
 
 
 @app.post("/sites")
-def sites(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_sites_page(_ctx(payload))}
+async def sites(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    data = await _sync_in_thread(data_service.get_sites_page, _ctx(payload, user))
+    return {"data": data}
 
 
 @app.post("/v2/sites")
-def sites_v2(payload: PaginatedPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_sites_page_v2(_ctx(payload), page=payload.page, page_size=payload.page_size, search=payload.search)}
+async def sites_v2(payload: PaginatedPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    data = await _sync_in_thread(
+        data_service.get_sites_page_v2,
+        _ctx(payload, user),
+        page=payload.page,
+        page_size=payload.page_size,
+        search=payload.search,
+    )
+    return {"data": data}
 
 
 @app.post("/inventory")
-def inventory(payload: InventoryPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def inventory(payload: InventoryPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {
         "data": data_service.get_inventory_page(
-            _ctx(payload),
+            _ctx(payload, user),
             payload.object_types,
         )
     }
 
 
 @app.post("/v2/inventory")
-def inventory_v2(payload: InventoryV2Payload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {
-        "data": data_service.get_inventory_page_v2(
-            _ctx(payload),
-            object_types=payload.object_types,
-            page=payload.page,
-            page_size=payload.page_size,
-            search=payload.search,
-        )
-    }
+async def inventory_v2(payload: InventoryV2Payload, user: AuthUser = Depends(get_current_user)) -> dict:
+    data = await _sync_in_thread(
+        data_service.get_inventory_page_v2,
+        _ctx(payload, user),
+        object_types=payload.object_types,
+        page=payload.page,
+        page_size=payload.page_size,
+        search=payload.search,
+    )
+    return {"data": data}
 
 
 @app.post("/delta")
-def delta(_: AuthUser = Depends(get_current_user)) -> dict:
+def delta(user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": data_service.get_delta_page()}
 
 
 @app.post("/delta/compare")
-def delta_compare(payload: DeltaComparePayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_delta_comparison(_ctx(payload), payload.compare_date_1, payload.compare_date_2)}
+def delta_compare(payload: DeltaComparePayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_delta_comparison(_ctx(payload, user), payload.compare_date_1, payload.compare_date_2)}
 
 
 @app.post("/statistics")
-def statistics(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_statistics_page(_ctx(payload))}
+def statistics(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_statistics_page(_ctx(payload, user))}
 
 
 @app.post("/prediction")
-def prediction(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_prediction_page(_ctx(payload))}
+def prediction(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_prediction_page(_ctx(payload, user))}
 
 
 @app.post("/analytics")
-def analytics(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_analytics_page(_ctx(payload))}
+def analytics(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_analytics_page(_ctx(payload, user))}
 
 
 @app.post("/temporal-changes")
-def temporal_changes(payload: FilterPayload, _: AuthUser = Depends(require_admin)) -> dict:
-    return {"data": data_service.get_temporal_changes_page(_ctx(payload))}
+def temporal_changes(payload: FilterPayload, user: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": data_service.get_temporal_changes_page(_ctx(payload, user))}
 
 
 @app.post("/asset-distribution")
-def asset_distribution(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_asset_distribution_page(_ctx(payload))}
+def asset_distribution(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_asset_distribution_page(_ctx(payload, user))}
 
 
 @app.post("/v2/asset-distribution")
-def asset_distribution_v2(payload: AssetDistributionV2Payload, _: AuthUser = Depends(get_current_user)) -> dict:
+def asset_distribution_v2(payload: AssetDistributionV2Payload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {
         "data": data_service.get_asset_distribution_page_v2(
-            _ctx(payload),
+            _ctx(payload, user),
             object_types=payload.object_types,
             page=payload.page,
             page_size=payload.page_size,
@@ -373,10 +399,10 @@ def asset_distribution_v2(payload: AssetDistributionV2Payload, _: AuthUser = Dep
 
 
 @app.post("/v2/asset-product-codes")
-def asset_product_codes_v2(payload: AssetDistributionV2Payload, _: AuthUser = Depends(get_current_user)) -> dict:
+def asset_product_codes_v2(payload: AssetDistributionV2Payload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {
         "data": data_service.get_asset_product_codes_page_v2(
-            _ctx(payload),
+            _ctx(payload, user),
             object_types=payload.object_types,
             page=payload.page,
             page_size=payload.page_size,
@@ -388,81 +414,81 @@ def asset_product_codes_v2(payload: AssetDistributionV2Payload, _: AuthUser = De
 
 
 @app.post("/global-counters")
-def global_counters(payload: FilterPayload, _: AuthUser = Depends(require_admin)) -> dict:
-    return {"data": data_service.get_global_counters_page(_ctx(payload))}
+def global_counters(payload: FilterPayload, user: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": data_service.get_global_counters_page(_ctx(payload, user))}
 
 
 @app.post("/quality")
-def quality(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_quality_page(_ctx(payload))}
+def quality(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_quality_page(_ctx(payload, user))}
 
 
 @app.post("/investigate/site")
-def investigate_site(payload: SiteInvestigationPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_site_investigation(_ctx(payload), payload.site_id, payload.object_type)}
+def investigate_site(payload: SiteInvestigationPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_site_investigation(_ctx(payload, user), payload.site_id, payload.object_type)}
 
 
 @app.post("/investigate/serial")
-def investigate_serial(payload: SerialInvestigationPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def investigate_serial(payload: SerialInvestigationPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": data_service.get_serial_investigation(payload.serial_number)}
 
 
 @app.post("/investigate/snapshot")
-def investigate_snapshot(payload: SnapshotInvestigationPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_analytics_snapshot_investigation(_ctx(payload), payload.snapshot_date)}
+def investigate_snapshot(payload: SnapshotInvestigationPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_analytics_snapshot_investigation(_ctx(payload, user), payload.snapshot_date)}
 
 
 @app.post("/investigate/object-type")
-def investigate_object_type(payload: ObjectTypeInvestigationPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_statistics_object_type_investigation(_ctx(payload), payload.object_type)}
+def investigate_object_type(payload: ObjectTypeInvestigationPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_statistics_object_type_investigation(_ctx(payload, user), payload.object_type)}
 
 
 @app.get("/vendors")
-def vendors(_: AuthUser = Depends(get_current_user)) -> dict:
+def vendors(user: AuthUser = Depends(get_current_user)) -> dict:
     for name in SUPPORTED_VENDORS:
         ensure_vendor_scaffold(name)
     return {"data": {"vendors": [vendor_status(v) for v in SUPPORTED_VENDORS]}}
 
 
 @app.post("/replacements")
-def replacements(payload: ReplacementsPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def replacements(payload: ReplacementsPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {
         "data": replacement_analytics_service.get_page(
-            _ctx(payload), payload.compare_date_1, payload.compare_date_2
+            _ctx(payload, user), payload.compare_date_1, payload.compare_date_2
         )
     }
 
 
 @app.post("/risk-cards")
-def risk_cards(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": risk_cards_service.get_page(_ctx(payload))}
+def risk_cards(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": risk_cards_service.get_page(_ctx(payload, user))}
 
 
 @app.post("/investigate/patterns")
-def investigate_patterns(payload: SerialPatternsPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def investigate_patterns(payload: SerialPatternsPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {
         "data": serial_patterns_service.investigate(
-            _ctx(payload), payload.prefix_length, payload.min_occurrences
+            _ctx(payload, user), payload.prefix_length, payload.min_occurrences
         )
     }
 
 
 @app.post("/spares/tracking")
-def spares_tracking(payload: SparesPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": spares_tracking_service.get_dashboard(_ctx(payload), payload.horizon_days)}
+def spares_tracking(payload: SparesPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": spares_tracking_service.get_dashboard(_ctx(payload, user), payload.horizon_days)}
 
 
 @app.get("/assistant/status")
-def assistant_status(_: AuthUser = Depends(get_current_user)) -> dict:
+def assistant_status(user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": openai_agent_service.status()}
 
 
 @app.post("/search/platform")
-def search_platform(payload: PlatformSearchPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def search_platform(payload: PlatformSearchPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     query = (payload.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
-    return {"data": platform_search_service.search(_ctx(payload), query)}
+    return {"data": platform_search_service.search(_ctx(payload, user), query)}
 
 
 @app.get("/search/web")
@@ -470,7 +496,7 @@ def search_web(
     q: str = "",
     language: str = "Français",
     max_results: int = 8,
-    _: AuthUser = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ) -> dict:
     query = (q or "").strip()
     if not query:
@@ -492,8 +518,8 @@ def search_web(
 
 
 @app.post("/kpi/site-timeseries")
-def site_kpi_timeseries(payload: SiteKpiPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+def site_kpi_timeseries(payload: SiteKpiPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
     timeseries_kpi_service.ingest_from_lake(ctx, limit_sites=2000)
     return {
         "data": timeseries_kpi_service.get_site_series(
@@ -506,19 +532,19 @@ def site_kpi_timeseries(payload: SiteKpiPayload, _: AuthUser = Depends(get_curre
 
 
 @app.post("/kpi/ingest")
-def kpi_ingest(payload: FilterPayload, _: AuthUser = Depends(require_admin)) -> dict:
-    return {"data": timeseries_kpi_service.ingest_from_lake(_ctx(payload))}
+def kpi_ingest(payload: FilterPayload, user: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": timeseries_kpi_service.ingest_from_lake(_ctx(payload, user))}
 
 
 @app.post("/kpi/critical-sites")
-def kpi_critical_sites(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+def kpi_critical_sites(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
     timeseries_kpi_service.ingest_from_lake(ctx, limit_sites=2000)
     return {"data": timeseries_kpi_service.get_critical_sites(ctx.vendor or "nokia")}
 
 
 @app.post("/rag/search")
-def rag_search(payload: RagSearchPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def rag_search(payload: RagSearchPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     rag_service.seed_defaults()
     return {"data": rag_service.search(payload.query, vendor=payload.vendor, top_k=payload.top_k)}
 
@@ -536,7 +562,7 @@ def rag_seed(_: AuthUser = Depends(require_admin)) -> dict:
 
 @app.post("/investigate/site/ai-rca")
 def investigate_site_ai_rca(payload: SiteInvestigationPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+    ctx = _ctx(payload, user)
     platform_activity_service.log_assistant_query(user_id=user.id, question=f"RCA site {payload.site_id}")
     rca = build_site_rca(ctx, payload.site_id)
     insight = assistant_intelligence_service.compose(
@@ -559,7 +585,7 @@ def _history_from_payload(payload: AssistantInsightPayload) -> list[dict]:
 
 @app.post("/assistant/insight")
 def assistant_insight(payload: AssistantInsightPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+    ctx = _ctx(payload, user)
     platform_activity_service.log_assistant_query(
         user_id=user.id,
         question=payload.question,
@@ -638,7 +664,7 @@ async def assistant_insight_with_files(
         raise HTTPException(status_code=400, detail=f"Invalid payload_json: {exc}") from exc
 
     payload = AssistantInsightPayload(**payload_data)
-    ctx = _ctx(payload)
+    ctx = _ctx(payload, user)
     platform_activity_service.log_assistant_query(
         user_id=user.id,
         question=question or payload.question,
@@ -671,32 +697,32 @@ async def assistant_insight_with_files(
 
 
 @app.post("/anomalies")
-def anomalies(payload: AnomalyPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_anomaly_alerts(_ctx(payload), replacement_threshold=payload.replacement_threshold)}
+def anomalies(payload: AnomalyPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": data_service.get_anomaly_alerts(_ctx(payload, user), replacement_threshold=payload.replacement_threshold)}
 
 
 @app.post("/ai-report")
-def ai_report(payload: FilterPayload, _: AuthUser = Depends(require_admin)) -> dict:
-    return {"data": data_service.get_ai_report(_ctx(payload))}
+def ai_report(payload: FilterPayload, user: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": data_service.get_ai_report(_ctx(payload, user))}
 
 
 @app.post("/spares")
-def spares(payload: SparesPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def spares(payload: SparesPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {
         "data": data_service.get_spares_dimensioning(
-            _ctx(payload), horizon_days=payload.horizon_days, service_level=payload.service_level
+            _ctx(payload, user), horizon_days=payload.horizon_days, service_level=payload.service_level
         )
     }
 
 
 @app.post("/clustering")
-def clustering(payload: ClusteringPayload, _: AuthUser = Depends(require_admin)) -> dict:
-    return {"data": data_service.get_site_clustering(_ctx(payload), n_clusters=payload.n_clusters)}
+def clustering(payload: ClusteringPayload, user: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": data_service.get_site_clustering(_ctx(payload, user), n_clusters=payload.n_clusters)}
 
 
 @app.post("/ops/summary")
-def ops_summary(payload: FilterPayload, _: AuthUser = Depends(require_admin)) -> dict:
-    return {"data": data_service.get_operational_summary(_ctx(payload))}
+def ops_summary(payload: FilterPayload, user: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": data_service.get_operational_summary(_ctx(payload, user))}
 
 
 @app.get("/ops/query-metrics")
@@ -745,7 +771,7 @@ async def client_errors(request: Request, payload: dict) -> dict:
 
 
 @app.get("/trust/anchors")
-def trust_anchors(_: AuthUser = Depends(get_current_user)) -> dict:
+def trust_anchors(user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": trust_service.list_anchors()}
 
 
@@ -760,27 +786,27 @@ def trust_anchor_latest(_: AuthUser = Depends(require_admin)) -> dict:
 
 
 @app.post("/trust/verify")
-def trust_verify(payload: TrustSnapshotPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def trust_verify(payload: TrustSnapshotPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": trust_service.verify_snapshot(payload.snapshot_date, payload.snapshot_path or None)}
 
 
 @app.post("/guardian/overview")
-def guardian_overview(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": guardian_orchestrator.get_guardian_overview(_ctx(payload))}
+def guardian_overview(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    return {"data": guardian_orchestrator.get_guardian_overview(_ctx(payload, user))}
 
 
 @app.post("/guardian/integrity")
-def guardian_integrity(payload: TrustSnapshotPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def guardian_integrity(payload: TrustSnapshotPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": integrity_service.get_snapshot_health(payload.snapshot_date)}
 
 
 @app.post("/guardian/verify")
-def guardian_verify(payload: TrustSnapshotPayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def guardian_verify(payload: TrustSnapshotPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": integrity_service.verify_snapshot_integrity(payload.snapshot_date)}
 
 
 @app.post("/guardian/changes")
-def guardian_changes(payload: DeltaComparePayload, _: AuthUser = Depends(get_current_user)) -> dict:
+def guardian_changes(payload: DeltaComparePayload, user: AuthUser = Depends(get_current_user)) -> dict:
     return {
         "data": change_intelligence_service.compare_snapshots(
             payload.compare_date_1,
@@ -791,8 +817,8 @@ def guardian_changes(payload: DeltaComparePayload, _: AuthUser = Depends(get_cur
 
 
 @app.post("/guardian/anomalies")
-def guardian_anomalies(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+def guardian_anomalies(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
     dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
     target = dates[-1] if dates else None
     rows = anomaly_intelligence_service.detect_anomalies(ctx, snapshot_date=target, persist=True) if target else []
@@ -800,8 +826,8 @@ def guardian_anomalies(payload: FilterPayload, _: AuthUser = Depends(get_current
 
 
 @app.post("/guardian/risks")
-def guardian_risks(payload: FilterPayload, _: AuthUser = Depends(get_current_user)) -> dict:
-    ctx = _ctx(payload)
+def guardian_risks(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
     dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
     target = dates[-1] if dates else None
     rows = predictive_risk_service.compute_risk_predictions(ctx, snapshot_date=target, persist=True) if target else []
@@ -825,7 +851,7 @@ async def guardian_run(payload: ProcessSnapshotsPayload, _: AuthUser = Depends(r
 
 
 @app.get("/integrations/powerbi/status")
-def powerbi_status(_: AuthUser = Depends(get_current_user)) -> dict:
+def powerbi_status(user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": powerbi_export_service.status()}
 
 
@@ -836,7 +862,7 @@ async def powerbi_sync(_: AuthUser = Depends(require_admin)) -> dict:
 
 
 @app.get("/integrations/powerbi/status")
-def powerbi_status(_: AuthUser = Depends(get_current_user)) -> dict:
+def powerbi_status(user: AuthUser = Depends(get_current_user)) -> dict:
     return {"data": powerbi_export_service.status()}
 
 

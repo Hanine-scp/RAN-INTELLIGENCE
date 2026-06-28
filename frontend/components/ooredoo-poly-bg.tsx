@@ -34,12 +34,12 @@ export function PlatformPolyAccent() {
         preserveAspectRatio="xMidYMid slice"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <polygon points="520,0 1440,0 1440,260 720,180" fill="#7ECEC1" />
-        <polygon points="720,180 1440,260 1440,620 1100,520" fill="#16A085" />
-        <polygon points="1100,520 1440,620 1440,900 620,900" fill="#74B9FF" />
-        <polygon points="280,420 720,180 1100,520 420,900" fill="#B8D4C8" />
+        <polygon points="520,0 1440,0 1440,260 720,180" fill="#94A3B8" />
+        <polygon points="720,180 1440,260 1440,620 1100,520" fill="#4ECDC4" />
+        <polygon points="1100,520 1440,620 1440,900 620,900" fill="#3498DB" />
+        <polygon points="280,420 720,180 1100,520 420,900" fill="#7D9B76" />
       </svg>
-      <div className="absolute bottom-0 left-0 h-32 w-full bg-gradient-to-t from-teal-50/20 to-transparent" />
+      <div className="absolute bottom-0 left-0 h-32 w-full bg-gradient-to-t from-slate-100/30 to-transparent" />
     </div>
   );
 }

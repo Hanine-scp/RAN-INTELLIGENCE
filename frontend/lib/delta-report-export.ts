@@ -120,7 +120,7 @@ export function openDeltaReportPdf(
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Delta Report</title>
 <style>
   body { font-family: Segoe UI, Arial, sans-serif; color: #1e293b; padding: 32px; max-width: 960px; margin: 0 auto; }
-  h1 { font-size: 22px; color: #0f766e; margin-bottom: 4px; }
+  h1 { font-size: 22px; color: #475569; margin-bottom: 4px; }
   .meta { color: #64748b; font-size: 12px; margin-bottom: 24px; }
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
   .kpi { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; background: #f8fafc; }

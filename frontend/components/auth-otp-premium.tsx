@@ -1,7 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
+import { useAuthFormTheme, type AuthFormTheme } from "@/lib/auth-theme";
 import { useLocale } from "@/lib/use-locale";
+
+function authPanel(theme: AuthFormTheme) {
+  return {
+    card: theme === "card",
+    centered: theme === "centered",
+    light: theme === "card",
+  };
+}
 
 type OtpPremiumInputProps = {
   label: string;
@@ -28,6 +37,7 @@ export function OtpPremiumInput({
   webOtpHint,
 }: OtpPremiumInputProps) {
   const inputId = useId();
+  const panel = authPanel(useAuthFormTheme());
 
   const normalize = useCallback(
     (raw: string) => {
@@ -63,7 +73,12 @@ export function OtpPremiumInput({
 
   return (
     <div className="block">
-      <label htmlFor={inputId} className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-white/65">
+      <label
+        htmlFor={inputId}
+        className={`mb-2 block text-sm font-semibold ${
+          panel.centered ? "text-white/90" : panel.card ? "text-slate-700" : "text-white/90"
+        }`}
+      >
         {label}
       </label>
       <input
@@ -76,7 +91,13 @@ export function OtpPremiumInput({
         onChange={(e) => setValue(e.target.value)}
         maxLength={length}
         placeholder={placeholder ?? (numeric ? "000000" : "ABC123")}
-        className="h-11 w-full rounded-lg border border-white/25 bg-white/10 px-4 text-center text-base font-semibold tracking-[0.28em] text-white outline-none backdrop-blur-sm transition placeholder:font-normal placeholder:tracking-normal placeholder:text-white/35 focus:border-white/50 focus:bg-white/15 focus:ring-2 focus:ring-white/10"
+        className={
+          panel.centered
+            ? "h-11 w-full border-0 border-b-2 border-white/55 bg-transparent px-1 text-center text-base font-semibold tracking-[0.28em] text-white outline-none transition placeholder:font-normal placeholder:tracking-normal placeholder:text-white/40 focus:border-white"
+            : panel.card
+              ? "h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-center text-base font-semibold tracking-[0.28em] text-slate-900 shadow-sm outline-none transition placeholder:font-normal placeholder:tracking-normal placeholder:text-slate-400 focus:border-[#b51218] focus:ring-4 focus:ring-[#b51218]/10"
+              : "h-12 w-full rounded-xl border border-white/50 bg-white/95 px-4 text-center text-base font-semibold tracking-[0.28em] text-slate-900 shadow-[0_4px_16px_rgba(0,0,0,0.14)] outline-none transition placeholder:font-normal placeholder:tracking-normal placeholder:text-slate-400 focus:border-white focus:ring-4 focus:ring-white/25"
+        }
         aria-label={label}
       />
     </div>
@@ -91,6 +112,7 @@ type ResendCountdownProps = {
 
 export function OtpResendCountdown({ seconds, disabled, onResend }: ResendCountdownProps) {
   const { ta } = useLocale();
+  const panel = authPanel(useAuthFormTheme());
   const [remaining, setRemaining] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -120,7 +142,13 @@ export function OtpResendCountdown({ seconds, disabled, onResend }: ResendCountd
           setLoading(false);
         }
       }}
-      className="w-full text-[10px] font-semibold uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-45 text-white/55 hover:text-white disabled:hover:text-white/55"
+      className={`w-full text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${
+        panel.centered
+          ? "text-white/65 hover:text-white disabled:hover:text-white/65"
+          : panel.card
+            ? "text-slate-500 hover:text-[#b51218] disabled:hover:text-slate-500"
+            : "text-white/55 hover:text-white disabled:hover:text-white/55"
+      }`}
     >
       {remaining > 0
         ? `${ta("auth_otp_resend_in")} ${remaining}s`
@@ -141,12 +169,27 @@ export function OtpDeliveryBanner({
   expiresMinutes?: number;
 }) {
   const { ta } = useLocale();
+  const panel = authPanel(useAuthFormTheme());
   if (!emailMasked && !phoneMasked) return null;
 
   return (
-    <div className="rounded-lg border border-white/20 bg-white/8 px-4 py-3 backdrop-blur-sm">
-      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/55">{ta("auth_otp_sent_title")}</p>
-      <div className="mt-2 space-y-1 text-sm text-white/88">
+    <div
+      className={
+        panel.centered
+          ? "rounded-md border border-white/20 bg-white/8 px-4 py-3 backdrop-blur-sm"
+          : panel.card
+            ? "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+            : "rounded-lg border border-white/20 bg-white/8 px-4 py-3 backdrop-blur-sm"
+      }
+    >
+      <p
+        className={`text-[10px] font-bold uppercase tracking-[0.12em] ${
+          panel.centered ? "text-white/55" : panel.card ? "text-slate-500" : "text-white/55"
+        }`}
+      >
+        {ta("auth_otp_sent_title")}
+      </p>
+      <div className={`mt-2 space-y-1 text-sm ${panel.centered ? "text-white/88" : panel.card ? "text-slate-700" : "text-white/88"}`}>
         {emailMasked ? (
           <p className="flex items-center gap-2">
             <span className="text-white/50">✉</span>
@@ -161,7 +204,7 @@ export function OtpDeliveryBanner({
         ) : null}
       </div>
       {expiresMinutes ? (
-        <p className="mt-2 text-[10px] text-white/45">
+        <p className={`mt-2 text-[10px] ${panel.centered ? "text-white/45" : panel.card ? "text-slate-400" : "text-white/45"}`}>
           {ta("auth_otp_expires")} {expiresMinutes} min
         </p>
       ) : null}

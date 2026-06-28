@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { KpiCards } from "@/components/kpi-cards";
 import { PageShell } from "@/components/page-shell";
+import { PageReportHost } from "@/components/page-report-host";
 import { useAppContext } from "@/components/app-provider";
 import { anchorLatestTrust, getCacheStats, getHttpMetrics, getOperationalSummary, getQueryMetrics, getTrustAnchors } from "@/lib/api";
 import { PageLoadingSkeleton } from "@/components/skeleton";
@@ -143,6 +144,7 @@ export default function OpsPage() {
 
   return (
     <PageShell title={t(language, "page_ops_title")} subtitle={t(language, "subtitle_ops")}>
+      <PageReportHost />
       {errorMessage ? (
         <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{errorMessage}</p>
       ) : null}

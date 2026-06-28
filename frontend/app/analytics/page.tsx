@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 export default function AnalyticsPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/insight?view=analytics");
+    router.replace("/power-bi");
   }, [router]);
   return null;
 }

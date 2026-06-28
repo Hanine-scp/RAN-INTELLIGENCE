@@ -1,82 +1,92 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AuthPhoneField, AuthPasswordField, isPhoneValueValid } from "@/components/auth-fields";
+import { AuthPasswordField, AuthPhoneField, isPhoneValueValid } from "@/components/auth-fields";
 import {
   AuthAlert,
-  AuthDevCodesPanel,
   AuthField,
+  AuthFormSection,
   AuthLayout,
   AuthLink,
   AuthPrimaryButton,
-  AuthSecondaryButton,
   AuthSelect,
   AuthVirginForm,
-  authTypography,
 } from "@/components/auth-layout";
-import { useAuth } from "@/components/auth-provider";
-import { getJobProfiles, resendSignupOtp, signupUser, verifySignup } from "@/lib/api";
-import { getNotificationsStatus } from "@/lib/auth-api";
-import type { AuthSession } from "@/lib/auth";
+import { getJobProfiles, registerAccount } from "@/lib/api";
+import { isPublicSignupEnabled } from "@/lib/auth-signup-policy";
+import { type JobProfile } from "@/lib/auth";
 import { isPasswordValid, passwordValidationMessage } from "@/lib/password-strength";
 import { AUTH_INPUT_NAMES, clearAuthRememberEmail, useVirginFormKey } from "@/lib/auth-virgin-form";
 import { useLocale } from "@/lib/use-locale";
 
-type Step = "form" | "verify" | "key";
-
-const DEFAULT_INVITE_KEY = process.env.NEXT_PUBLIC_SIGNUP_INVITE_KEY ?? "RAN-USER-INVITE-2026";
+function SignupSuccessPanel({ onLogin }: { onLogin: () => void }) {
+  const { ta } = useLocale();
+  return (
+    <div className="space-y-5 text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 ring-4 ring-emerald-100">
+        <svg viewBox="0 0 24 24" className="h-8 w-8 fill-emerald-600" aria-hidden>
+          <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" />
+        </svg>
+      </div>
+      <p className="text-sm leading-relaxed text-slate-600">{ta("auth_signup_pending_hint")}</p>
+      <AuthPrimaryButton type="button" onClick={onLogin}>
+        {ta("auth_go_login")}
+      </AuthPrimaryButton>
+    </div>
+  );
+}
 
 export default function SignupPage() {
   const router = useRouter();
-  const { setSession } = useAuth();
   const { locale, isFr, ta } = useLocale();
-  const [step, setStep] = useState<Step>("form");
-  const [jobProfiles, setJobProfiles] = useState<{ id: string; fr: string; en: string }[]>([]);
-  const [userId, setUserId] = useState<number | null>(null);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [jobProfile, setJobProfile] = useState("");
+  const [department, setDepartment] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [jobProfile, setJobProfile] = useState("");
-  const [emailCode, setEmailCode] = useState("");
-  const [phoneCode, setPhoneCode] = useState("");
-  const [sessionAccessKey, setSessionAccessKey] = useState("");
-  const [pendingSession, setPendingSession] = useState<AuthSession | null>(null);
-  const [devEmailCode, setDevEmailCode] = useState("");
-  const [devSmsCode, setDevSmsCode] = useState("");
-  const [info, setInfo] = useState("");
+  const [profiles, setProfiles] = useState<JobProfile[]>([]);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
-  const [notificationsReady, setNotificationsReady] = useState<boolean | null>(null);
+  const [done, setDone] = useState(false);
   const virginFormKey = useVirginFormKey();
+  const signupOpen = isPublicSignupEnabled();
+
+  const profileOptions = useMemo(
+    () => profiles.map((profile) => ({ id: profile.id, label: isFr ? profile.fr : profile.en })),
+    [profiles, isFr],
+  );
 
   useEffect(() => {
     clearAuthRememberEmail();
-    getJobProfiles()
-      .then(setJobProfiles)
-      .catch(() => setJobProfiles([]));
-    getNotificationsStatus()
-      .then((s) => setNotificationsReady(s.email_ready && s.sms_ready))
-      .catch(() => setNotificationsReady(false));
   }, []);
 
-  const titles: Record<Step, string> = {
-    form: ta("auth_signup"),
-    verify: ta("auth_verify"),
-    key: ta("auth_session_key"),
-  };
+  useEffect(() => {
+    if (!signupOpen) return;
+    getJobProfiles()
+      .then(setProfiles)
+      .catch(() => setProfiles([]));
+  }, [signupOpen]);
 
-  const subtitles: Record<Step, string> = {
-    form: ta("auth_sub_signup"),
-    verify: ta("auth_sub_verify"),
-    key: ta("auth_sub_session_key"),
-  };
-
-  const onSignup = async (event: FormEvent) => {
+  const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
+    if (!fullName.trim()) {
+      setError(ta("auth_err_full_name"));
+      return;
+    }
+    if (!jobProfile.trim()) {
+      setError(ta("auth_err_job_profile"));
+      return;
+    }
+    if (!isPhoneValueValid(phone)) {
+      setError(ta("auth_err_phone"));
+      return;
+    }
     const pwdError = passwordValidationMessage(password, locale);
     if (pwdError) {
       setError(pwdError);
@@ -90,36 +100,20 @@ export default function SignupPage() {
       setError(ta("auth_err_password_mismatch"));
       return;
     }
-    if (!jobProfile) {
-      setError(ta("auth_err_job_profile"));
-      return;
-    }
-    if (!isPhoneValueValid(phone)) {
-      setError(ta("auth_err_phone"));
-      return;
-    }
 
     setLoading(true);
-    setInfo("");
-    setDevEmailCode("");
-    setDevSmsCode("");
     try {
-      const data = await signupUser({
-        full_name: fullName.trim(),
+      const data = await registerAccount({
         email: email.trim(),
-        phone,
         password,
+        full_name: fullName.trim(),
+        phone: phone.trim(),
         job_profile: jobProfile,
-        signup_access_key: DEFAULT_INVITE_KEY,
+        department: department.trim(),
+        employee_id: employeeId.trim(),
       });
-      setUserId(data.user_id);
-      setStep("verify");
-
-      const emailSent = data.notifications?.email_otp;
-      const smsSent = data.notifications?.sms_otp;
-      setInfo(emailSent && smsSent ? ta("auth_info_codes_sent") : ta("auth_info_account_created_dev"));
-      setDevEmailCode(data.verification.dev_email_code ?? "");
-      setDevSmsCode(data.verification.dev_phone_code ?? "");
+      setDone(true);
+      setInfo(data.message || ta("auth_sub_signup_user_done"));
     } catch (err) {
       setError(err instanceof Error ? err.message : ta("auth_err_signup_denied"));
     } finally {
@@ -127,191 +121,107 @@ export default function SignupPage() {
     }
   };
 
-  const onResend = async () => {
-    if (!userId) return;
-    setLoading(true);
-    setError("");
-    try {
-      const data = await resendSignupOtp(userId);
-      setInfo(data.message || ta("auth_info_codes_resent"));
-      setDevEmailCode(data.verification.dev_email_code ?? "");
-      setDevSmsCode(data.verification.dev_phone_code ?? "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : ta("auth_err_resend_failed"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onVerify = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!userId) return;
-    if (!/^[A-Z0-9]{6}$/.test(emailCode)) {
-      setError(ta("auth_err_email_otp_format"));
-      return;
-    }
-    if (!/^\d{6}$/.test(phoneCode)) {
-      setError(ta("auth_err_sms_otp_format"));
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      const session = await verifySignup({
-        user_id: userId,
-        email_code: emailCode.trim(),
-        phone_code: phoneCode.trim(),
-      });
-      setPendingSession(session);
-      setInfo(session.message || "");
-      if (session.session_access_key) {
-        setSessionAccessKey(session.session_access_key);
-        setStep("key");
-      } else if (session.message) {
-        setStep("key");
-      } else {
-        setSession(session);
-        router.replace("/");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : ta("auth_err_verify_failed"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onFinish = () => {
-    if (!pendingSession) {
-      router.replace("/login");
-      return;
-    }
-    setSession(pendingSession);
-    router.replace("/");
-  };
-
   return (
     <AuthLayout
-      formTitle={titles[step]}
-      formSubtitle={step === "form" ? undefined : subtitles[step]}
+      wide
+      contentPanel={signupOpen || done}
+      formEyebrow={done ? undefined : "RAN Intelligence · Ooredoo"}
+      formTitle={done ? ta("auth_sub_signup_pending_title") : ta("auth_signup_user")}
+      formSubtitle={done ? ta("auth_sub_signup_user_done") : signupOpen ? ta("auth_sub_signup_user") : undefined}
       footer={
-        <>
+        <p>
           {ta("auth_has_account")} <AuthLink href="/login">{ta("auth_login")}</AuthLink>
-          <p className={`mt-3 ${authTypography.line2}`}>
-            {ta("auth_admin_signup_hint")}{" "}
-            <AuthLink href="/admin/setup">{ta("auth_admin_signup_link")}</AuthLink>
-          </p>
-        </>
+        </p>
       }
     >
-      {error ? <AuthAlert tone="error">{error}</AuthAlert> : null}
-      {info ? <AuthAlert tone="success">{info}</AuthAlert> : null}
-      <AuthDevCodesPanel emailCode={devEmailCode} smsCode={devSmsCode} />
-
-      {step === "form" ? (
-        <AuthVirginForm key={virginFormKey} onSubmit={onSignup} className="space-y-3">
-          <AuthField
-            label={ta("auth_full_name")}
-            name={AUTH_INPUT_NAMES.fullName}
-            value={fullName}
-            onChange={setFullName}
-            placeholder={ta("auth_placeholder_full_name")}
-            icon="user"
-          />
-          <AuthField
-            label={ta("auth_email")}
-            type="email"
-            name={AUTH_INPUT_NAMES.email}
-            value={email}
-            onChange={setEmail}
-            placeholder={ta("auth_placeholder_email")}
-            icon="mail"
-          />
-          <AuthPhoneField label={ta("auth_phone")} value={phone} onChange={setPhone} defaultRegion="TN" />
-          <div className="space-y-2">
-            <AuthPasswordField label={ta("auth_password")} value={password} onChange={setPassword} placeholder={ta("auth_placeholder_password")} />
-            <AuthPasswordField
-              label={ta("auth_confirm_password")}
-              value={confirmPassword}
-              onChange={setConfirmPassword}
-              placeholder={ta("auth_confirm_password")}
-              showStrength={false}
-              showRules={false}
-            />
-          </div>
-          <AuthSelect
-            label={ta("auth_job_profile")}
-            value={jobProfile}
-            onChange={setJobProfile}
-            options={jobProfiles.map((p) => ({ id: p.id, label: isFr ? p.fr : p.en }))}
-          />
-          {notificationsReady === false ? <p className="text-[10px] text-white/50">{ta("auth_notifications_hint")}</p> : null}
-          <AuthPrimaryButton disabled={loading}>{loading ? "..." : ta("auth_signup")}</AuthPrimaryButton>
-        </AuthVirginForm>
-      ) : null}
-
-      {step === "verify" ? (
-        <AuthVirginForm key={`${virginFormKey}-verify`} onSubmit={onVerify} className="space-y-3">
-          <AuthField
-            label={ta("auth_email_code")}
-            name={AUTH_INPUT_NAMES.emailOtp}
-            value={emailCode}
-            onChange={(v) => setEmailCode(v.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6))}
-            icon="mail"
-            placeholder={ta("auth_placeholder_email_otp")}
-            maxLength={6}
-            autoComplete="one-time-code"
-            virgin={false}
-          />
-          <AuthField
-            label={ta("auth_sms_code")}
-            name={AUTH_INPUT_NAMES.phoneOtp}
-            value={phoneCode}
-            onChange={(v) => setPhoneCode(v.replace(/\D/g, "").slice(0, 6))}
-            icon="phone"
-            placeholder={ta("auth_placeholder_sms_otp")}
-            inputMode="numeric"
-            maxLength={6}
-            autoComplete="one-time-code"
-            virgin={false}
-          />
-          <AuthPrimaryButton disabled={loading}>{loading ? "..." : ta("auth_verify")}</AuthPrimaryButton>
-          <AuthSecondaryButton disabled={loading} onClick={() => void onResend()}>
-            {ta("auth_resend_codes")}
-          </AuthSecondaryButton>
-          <AuthSecondaryButton
-            variant="ghost"
-            onClick={() => {
-              setStep("form");
-              setEmailCode("");
-              setPhoneCode("");
-              setDevEmailCode("");
-              setDevSmsCode("");
-              setError("");
-            }}
-          >
-            {ta("auth_back")}
-          </AuthSecondaryButton>
-        </AuthVirginForm>
-      ) : null}
-
-      {step === "key" ? (
+      {!signupOpen && !done ? (
         <div className="space-y-4">
-          <AuthAlert tone="success">{ta("auth_account_activated")}</AuthAlert>
-          <div className="rounded-md border border-white/25 bg-white/10 px-4 py-4 text-center backdrop-blur-sm">
-            {sessionAccessKey ? (
-              <>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-white/55">{ta("auth_next_session_key")}</p>
-                <p className="mt-2 break-all font-mono text-base font-bold text-white">{sessionAccessKey}</p>
-              </>
-            ) : (
-              <p className="text-sm text-white/85">{ta("auth_session_key_sent")}</p>
-            )}
-          </div>
-          <AuthPrimaryButton type="button" onClick={onFinish}>
-            {ta("auth_continue")}
+          <AuthAlert tone="warning">{ta("auth_accounts_admin_managed")}</AuthAlert>
+          <AuthPrimaryButton type="button" onClick={() => router.push("/login")}>
+            {ta("auth_go_login")}
           </AuthPrimaryButton>
         </div>
-      ) : null}
+      ) : done ? (
+        <SignupSuccessPanel onLogin={() => router.push("/login")} />
+      ) : (
+        <>
+          {error ? <AuthAlert tone="error">{error}</AuthAlert> : null}
+          {info ? <AuthAlert tone="success">{info}</AuthAlert> : null}
+
+          <AuthVirginForm key={virginFormKey} onSubmit={onSubmit} className="space-y-6">
+            <AuthFormSection title={ta("auth_signup_section_identity")}>
+              <AuthField
+                label={ta("auth_full_name")}
+                name={AUTH_INPUT_NAMES.fullName}
+                value={fullName}
+                onChange={setFullName}
+                placeholder={ta("auth_placeholder_full_name")}
+                icon="user"
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AuthField
+                  label={ta("auth_email")}
+                  type="email"
+                  name={AUTH_INPUT_NAMES.email}
+                  value={email}
+                  onChange={setEmail}
+                  placeholder={ta("auth_placeholder_email")}
+                  icon="mail"
+                />
+                <AuthPhoneField label={ta("auth_phone")} value={phone} onChange={setPhone} />
+              </div>
+            </AuthFormSection>
+
+            <AuthFormSection title={ta("auth_signup_section_profile")}>
+              <AuthSelect
+                label={ta("auth_job_profile")}
+                value={jobProfile}
+                onChange={setJobProfile}
+                options={profileOptions}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AuthField
+                  label={ta("auth_department")}
+                  name="department"
+                  value={department}
+                  onChange={setDepartment}
+                  placeholder={ta("auth_placeholder_department")}
+                  icon="user"
+                />
+                <AuthField
+                  label={ta("auth_employee_id")}
+                  name="employee_id"
+                  value={employeeId}
+                  onChange={setEmployeeId}
+                  placeholder={ta("auth_placeholder_employee_id")}
+                  icon="key"
+                />
+              </div>
+            </AuthFormSection>
+
+            <AuthFormSection title={ta("auth_signup_section_security")}>
+              <AuthPasswordField
+                label={ta("auth_password")}
+                value={password}
+                onChange={setPassword}
+                placeholder={ta("auth_placeholder_password")}
+              />
+              <AuthPasswordField
+                label={ta("auth_confirm_password")}
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                placeholder={ta("auth_confirm_password")}
+                showStrength={false}
+                showRules={false}
+              />
+            </AuthFormSection>
+
+            <AuthPrimaryButton disabled={loading}>
+              {loading ? "..." : ta("auth_signup_submit")}
+            </AuthPrimaryButton>
+          </AuthVirginForm>
+        </>
+      )}
     </AuthLayout>
   );
 }

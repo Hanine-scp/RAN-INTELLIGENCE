@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.services.auth_service import AuthUser, auth_service
+from src.services.auth_token_resolver import resolve_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -23,7 +24,7 @@ def get_current_user(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     try:
-        return auth_service.get_user_from_access_token(credentials.credentials)
+        return resolve_access_token(credentials.credentials)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 

@@ -6,7 +6,7 @@ import { KpiCards } from "@/components/kpi-cards";
 import { MultiBarChart } from "@/components/charts";
 import { useAppContext } from "@/components/app-provider";
 import { getSpares, getSparesTracking } from "@/lib/api";
-import { CHART_PRIMARY } from "@/lib/chart-theme";
+import { CHART_PRIMARY, CHART_SECONDARY } from "@/lib/chart-theme";
 
 type SparesResponse = Awaited<ReturnType<typeof getSpares>>;
 
@@ -107,7 +107,7 @@ export function SparesSection() {
                 type="button"
                 onClick={() => setHorizon(value)}
                 className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                  horizon === value ? "border-teal-500 bg-teal-600 text-white" : "border-slate-300 bg-white text-slate-600"
+                  horizon === value ? "border-teal-500 bg-teal-500 text-white" : "border-slate-300 bg-white text-slate-600"
                 }`}
               >
                 {value}j
@@ -138,7 +138,7 @@ export function SparesSection() {
             xKey="product_code"
             bars={[
               { key: "recommended_spares", color: CHART_PRIMARY },
-              { key: "replacements", color: "#94a3b8" },
+              { key: "replacements", color: CHART_SECONDARY },
             ]}
             height={280}
           />

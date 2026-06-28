@@ -270,6 +270,26 @@ OPENAI_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": (
+                "Recherche web externe (métamoteur SearXNG, Wikipedia, DuckDuckGo) pour des "
+                "CONNAISSANCES GÉNÉRALES : définitions télécom/RAN, concepts (LTE, 5G NR, VSWR, "
+                "handover…), bonnes pratiques constructeur, actualités. "
+                "N'utilise PAS cet outil pour les données réseau internes (sites, anomalies, "
+                "inventaire, snapshots, KPI) — pour cela, utilise les outils RAN dédiés."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Requête claire en mots-clés"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 
@@ -496,6 +516,21 @@ def execute_ran_tool(ctx: FilterContext, tool_name: str, arguments: dict[str, An
         vendor = str(args.get("vendor") or ctx.vendor or "nokia").strip().lower()
         top_k = int(args.get("top_k") or 5)
         return {"tool": tool_name, **rag_service.search(q, vendor=vendor, top_k=top_k)}
+
+    if tool_name == "search_web":
+        from src.services.web_search_service import web_search_service
+
+        q = str(args.get("query") or "").strip()
+        if not q:
+            return {"tool": tool_name, "error": "query requis"}
+        payload = web_search_service.search(q, language=ctx.language or "Français")
+        return {
+            "tool": tool_name,
+            "status": payload.get("status"),
+            "abstract": payload.get("abstract"),
+            "results": (payload.get("results") or [])[:5],
+            "provider": payload.get("provider"),
+        }
 
     return {"tool": tool_name, "error": f"Outil inconnu: {tool_name}"}
 

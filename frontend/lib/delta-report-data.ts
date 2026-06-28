@@ -258,8 +258,94 @@ export function buildDeltaAiPrompt(fr: boolean, customNeeds: string, report: Del
   const json = JSON.stringify(summary, null, 0).slice(0, 6000);
 
   return fr
-    ? `Rédige UN rapport expert Delta RAN entre ${report.referenceDate} (référence) et ${report.comparisonDate} (comparaison). Requête NOC: ${needs || "Analyse delta standard"}. Données: ${json}. Réponds UNIQUEMENT en markdown (sections ##). Priorise sites ajoutés/supprimés, delta équipements, cellules 4G/5G, dégradations qualité. Style concis, décisionnel. Ne répète pas cette consigne.`
-    : `Write ONE expert RAN Delta report between ${report.referenceDate} (reference) and ${report.comparisonDate} (comparison). NOC query: ${needs || "Standard delta analysis"}. Data: ${json}. Reply ONLY in markdown (## sections). Prioritize added/removed sites, equipment delta, 4G/5G cells, quality degradations. Concise, decision-oriented. Do not repeat this instruction.`;
+    ? `Rédige UN rapport expert Delta RAN entre ${report.referenceDate} (référence) et ${report.comparisonDate} (comparaison). Requête NOC: ${needs || "Analyse delta standard"}. Données: ${json}. Réponds UNIQUEMENT en markdown (sections ##). Priorise sites ajoutés/supprimés, delta équipements, cellules 4G/5G, signaux de régression. Style concis, décisionnel. Ne répète pas cette consigne.`
+    : `Write ONE expert RAN Delta report between ${report.referenceDate} (reference) and ${report.comparisonDate} (comparison). NOC query: ${needs || "Standard delta analysis"}. Data: ${json}. Reply ONLY in markdown (## sections). Prioritize added/removed sites, equipment delta, 4G/5G cells, regression signals. Concise, decision-oriented. Do not repeat this instruction.`;
+}
+
+function metricLabel(metric: unknown, fr: boolean): string {
+  const key = String(metric ?? "");
+  return METRIC_LABELS[key] ?? key;
+}
+
+/** Rapport markdown local — fallback si l'IA renvoie le narrateur brut */
+export function buildDeltaLocalAiMarkdown(fr: boolean, report: DeltaPageReport, customNeeds?: string): string {
+  const needs = customNeeds?.trim();
+  const topImpacts = report.impactRows.slice(0, 6);
+
+  if (fr) {
+    return [
+      "## Synthèse exécutive",
+      needs
+        ? `Période **${report.referenceDate} → ${report.comparisonDate}** — focus NOC : ${needs}.`
+        : `Comparaison delta **${report.referenceDate} → ${report.comparisonDate}**.`,
+      `${report.kpis.sitesAdded} site(s) ajouté(s), ${report.kpis.sitesRemoved} supprimé(s), **${report.kpis.equipmentDelta >= 0 ? "+" : ""}${report.kpis.equipmentDelta}** équipements, ${report.kpis.degradations} signal(aux) de dégradation.`,
+      "",
+      "## Évolution du parc",
+      `- Sites : ${report.sitesComparison.oldValue.toLocaleString()} → ${report.sitesComparison.newValue.toLocaleString()} (${report.sitesComparison.delta >= 0 ? "+" : ""}${report.sitesComparison.delta}, ${report.sitesComparison.deltaPct}%)`,
+      `- Équipements : ${report.equipmentComparison.oldValue.toLocaleString()} → ${report.equipmentComparison.newValue.toLocaleString()} (${report.equipmentComparison.delta >= 0 ? "+" : ""}${report.equipmentComparison.delta})`,
+      `- Mouvements : +${report.equipmentChangeKpis.added} / −${report.equipmentChangeKpis.removed} (total ${report.equipmentChangeKpis.total})`,
+      "",
+      "## Cellules par technologie",
+      ...report.cellsComparison.tableRows.map(
+        (row) =>
+          `- **${row.cellule}** : ${Number(row.ancienne_valeur).toLocaleString()} → ${Number(row.nouvelle_valeur).toLocaleString()} (${Number(row.nouvelle_valeur) - Number(row.ancienne_valeur) >= 0 ? "+" : ""}${Number(row.nouvelle_valeur) - Number(row.ancienne_valeur)})`,
+      ),
+      "",
+      "## Top impacts",
+      ...topImpacts.map(
+        (row) =>
+          `- ${metricLabel(row.metric, true)} : ${Number(row.delta) >= 0 ? "+" : ""}${Number(row.delta ?? 0).toLocaleString()}`,
+      ),
+      "",
+      "## Recommandations NOC",
+      report.kpis.sitesAdded > 0
+        ? `- Valider l'onboarding des **${report.kpis.sitesAdded}** nouveaux sites (inventaire + cellules).`
+        : null,
+      report.kpis.degradations > 0
+        ? `- Traiter en priorité les **${report.kpis.degradations}** métriques en dégradation.`
+        : "- Aucune dégradation majeure détectée sur les KPI delta.",
+      report.fourGRows.length
+        ? `- 4G : FDD ${report.fourGRows.find((r) => String(r.indicateur).includes("FDD"))?.delta ?? "—"} · TDD ${report.fourGRows.find((r) => String(r.indicateur).includes("TDD"))?.delta ?? "—"}.`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return [
+    "## Executive summary",
+    needs
+      ? `Period **${report.referenceDate} → ${report.comparisonDate}** — NOC focus: ${needs}.`
+      : `Delta comparison **${report.referenceDate} → ${report.comparisonDate}**.`,
+    `${report.kpis.sitesAdded} site(s) added, ${report.kpis.sitesRemoved} removed, equipment **${report.kpis.equipmentDelta >= 0 ? "+" : ""}${report.kpis.equipmentDelta}**, ${report.kpis.degradations} degradation signal(s).`,
+    "",
+    "## Fleet evolution",
+    `- Sites: ${report.sitesComparison.oldValue.toLocaleString()} → ${report.sitesComparison.newValue.toLocaleString()} (${report.sitesComparison.delta >= 0 ? "+" : ""}${report.sitesComparison.delta}, ${report.sitesComparison.deltaPct}%)`,
+    `- Equipment: ${report.equipmentComparison.oldValue.toLocaleString()} → ${report.equipmentComparison.newValue.toLocaleString()} (${report.equipmentComparison.delta >= 0 ? "+" : ""}${report.equipmentComparison.delta})`,
+    `- Movements: +${report.equipmentChangeKpis.added} / −${report.equipmentChangeKpis.removed} (total ${report.equipmentChangeKpis.total})`,
+    "",
+    "## Cells by technology",
+    ...report.cellsComparison.tableRows.map(
+      (row) =>
+        `- **${row.cellule}**: ${Number(row.ancienne_valeur).toLocaleString()} → ${Number(row.nouvelle_valeur).toLocaleString()} (${Number(row.nouvelle_valeur) - Number(row.ancienne_valeur) >= 0 ? "+" : ""}${Number(row.nouvelle_valeur) - Number(row.ancienne_valeur)})`,
+    ),
+    "",
+    "## Top impacts",
+    ...topImpacts.map(
+      (row) =>
+        `- ${metricLabel(row.metric, false)}: ${Number(row.delta) >= 0 ? "+" : ""}${Number(row.delta ?? 0).toLocaleString()}`,
+    ),
+    "",
+    "## NOC recommendations",
+    report.kpis.sitesAdded > 0
+      ? `- Validate onboarding for **${report.kpis.sitesAdded}** new sites (inventory + cells).`
+      : null,
+    report.kpis.degradations > 0
+      ? `- Prioritize **${report.kpis.degradations}** degraded metric(s).`
+      : "- No major degradation on delta KPIs.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export type DeltaReportTable = {

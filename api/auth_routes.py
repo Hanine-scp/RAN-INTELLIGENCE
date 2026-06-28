@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from api.dependencies import get_current_user, require_admin
@@ -15,6 +17,9 @@ from api.schemas import (
     CreateAccessKeyPayload,
     ForgotPasswordPayload,
     LoginPayload,
+    LoginMfaResendPayload,
+    LoginSecurityResendPayload,
+    LoginSecurityVerifyPayload,
     RefreshTokenPayload,
     RegisterPayload,
     ResetPasswordPayload,
@@ -27,15 +32,48 @@ from api.schemas import (
     UserStatusPayload,
 )
 from src.services.auth_database import check_database_connection
-from src.services.auth_service import AuthUser, auth_service
+from src.services.auth_service import AuthUser, SecurityVerificationRequired, auth_service
 from src.services.notification_service import notification_service
 from src.services.platform_activity_service import platform_activity_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _public_signup_enabled() -> bool:
+    return os.getenv("AUTH_PUBLIC_SIGNUP", "false").lower() in {"1", "true", "yes"}
+
+
+def _require_public_signup() -> None:
+    if not _public_signup_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="Public registration is disabled. Contact an administrator to create your account.",
+        )
+
+
 def _handle_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _handle_security_verification(exc: SecurityVerificationRequired) -> HTTPException:
+    return HTTPException(
+        status_code=423,
+        detail={
+            "code": "login_security_required",
+            "user_id": exc.user_id,
+            "message": exc.message,
+            "verification": exc.verification,
+            "failed_attempts": exc.failed_attempts,
+        },
+    )
+
+
+def _handle_auth_exception(exc: Exception) -> HTTPException:
+    if isinstance(exc, SecurityVerificationRequired):
+        return _handle_security_verification(exc)
+    if isinstance(exc, ValueError):
+        return _handle_value_error(exc)
+    raise exc
 
 
 @router.get("/job-profiles")
@@ -60,15 +98,46 @@ def activity_log(admin: AuthUser = Depends(require_admin), limit: int = 50) -> d
     return {"data": platform_activity_service.recent_activity(limit=limit)}
 
 
+def _client_meta(request: Request) -> dict[str, str]:
+    ip = request.client.host if request.client else ""
+    return {
+        "login_ip": ip[:64],
+        "login_user_agent": request.headers.get("user-agent", "")[:512],
+    }
+
+
+@router.get("/security/summary")
+def security_summary(_: AuthUser = Depends(require_admin)) -> dict:
+    return {"data": auth_service.security_center_summary()}
+
+
+@router.get("/security/audit")
+def security_audit(_: AuthUser = Depends(require_admin), limit: int = 100) -> dict:
+    return {"data": auth_service.list_auth_audit(limit=limit)}
+
+
 @router.post("/register")
-def register(request: Request, payload: RegisterPayload, background_tasks: BackgroundTasks) -> dict:
+def register(request: Request, payload: RegisterPayload) -> dict:
+    _require_public_signup()
     rate_limiter.check(request, namespace="auth_register", max_requests=12)
     try:
-        data = auth_service.register_user(**payload.model_dump())
-        email_job = data.pop("_email_job", None)
-        if email_job:
-            background_tasks.add_task(auth_service.deliver_registration_email, **email_job)
-        return {"data": data}
+        return {"data": auth_service.register_user(**payload.model_dump())}
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.post("/users/{user_id}/approve-access")
+def approve_user_access(user_id: int, admin: AuthUser = Depends(require_admin)) -> dict:
+    try:
+        return {"data": auth_service.approve_signup_access(user_id=user_id, actor_id=admin.id)}
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.post("/users/{user_id}/reject-access")
+def reject_user_access(user_id: int, admin: AuthUser = Depends(require_admin)) -> dict:
+    try:
+        return {"data": auth_service.reject_signup_access(user_id=user_id, actor_id=admin.id)}
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -77,7 +146,25 @@ def register(request: Request, payload: RegisterPayload, background_tasks: Backg
 def login(request: Request, payload: LoginPayload) -> dict:
     rate_limiter.check(request, namespace="auth_login", max_requests=20)
     try:
-        return {"data": auth_service.login_user(**payload.model_dump())}
+        return {"data": auth_service.login_user(**payload.model_dump(), **_client_meta(request))}
+    except (ValueError, SecurityVerificationRequired) as exc:
+        raise _handle_auth_exception(exc) from exc
+
+
+@router.post("/login/security/verify")
+def verify_login_security(request: Request, payload: LoginSecurityVerifyPayload) -> dict:
+    rate_limiter.check(request, namespace="auth_login_security", max_requests=12)
+    try:
+        return {"data": auth_service.verify_login_security(**payload.model_dump())}
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.post("/login/security/resend")
+def resend_login_security(request: Request, payload: LoginSecurityResendPayload) -> dict:
+    rate_limiter.check(request, namespace="auth_login_security_resend", max_requests=6)
+    try:
+        return {"data": auth_service.resend_login_security_otp(**payload.model_dump())}
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -161,6 +248,7 @@ def bootstrap_admin_verify(payload: AdminBootstrapVerifyPayload) -> dict:
 
 @router.post("/signup")
 def signup(payload: SignupPayload) -> dict:
+    _require_public_signup()
     try:
         return {"data": auth_service.signup_user(**payload.model_dump())}
     except ValueError as exc:
@@ -234,8 +322,8 @@ def signup_verify(payload: SignupVerifyPayload) -> dict:
 def login_user_step1(payload: UserLoginStep1Payload) -> dict:
     try:
         return {"data": auth_service.login_user_step1(**payload.model_dump())}
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
+    except (ValueError, SecurityVerificationRequired) as exc:
+        raise _handle_auth_exception(exc) from exc
 
 
 @router.post("/login/user/mfa")
@@ -246,18 +334,34 @@ def login_user_step2(payload: UserLoginStep2Payload) -> dict:
         raise _handle_value_error(exc) from exc
 
 
+@router.post("/login/user/mfa/resend")
+def resend_login_user_mfa(payload: LoginMfaResendPayload) -> dict:
+    try:
+        return {"data": auth_service.resend_login_mfa_otp(user_id=payload.user_id, role="responsable")}
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
 @router.post("/login/admin")
 def login_admin_step1(payload: AdminLoginStep1Payload) -> dict:
     try:
         return {"data": auth_service.login_admin_step1(**payload.model_dump())}
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
+    except (ValueError, SecurityVerificationRequired) as exc:
+        raise _handle_auth_exception(exc) from exc
 
 
 @router.post("/login/admin/verify")
 def login_admin_step2(payload: AdminLoginStep2Payload) -> dict:
     try:
         return {"data": auth_service.login_admin_step2(**payload.model_dump())}
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.post("/login/admin/mfa/resend")
+def resend_login_admin_mfa(payload: LoginMfaResendPayload) -> dict:
+    try:
+        return {"data": auth_service.resend_login_mfa_otp(user_id=payload.user_id, role="admin")}
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 

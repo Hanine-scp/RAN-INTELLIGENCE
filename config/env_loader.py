@@ -38,7 +38,7 @@ def _apply_env_aliases() -> None:
 def load_auth_env() -> None:
     _patch_bcrypt_for_passlib()
     root = Path(__file__).resolve().parents[1]
-    for name in (".env.auth", ".env.ai", ".env"):
+    for name in (".env.auth", ".env.ai", ".env.performance", ".env"):
         path = root / name
         if not path.exists():
             continue

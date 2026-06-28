@@ -14,6 +14,59 @@ def _lang_code(language: str) -> str:
     return "fr" if (language or "").startswith("Fr") else "en"
 
 
+class SearxngSearchProvider:
+    """Métamoteur auto-hébergé (SearXNG) — aucune API tierce, egress maîtrisé."""
+
+    def __init__(self) -> None:
+        self.base_url = os.getenv("SEARXNG_URL", "").strip().rstrip("/")
+
+    def is_enabled(self) -> bool:
+        return bool(self.base_url)
+
+    def search(self, query: str, max_results: int = 6, language: str = "Français") -> dict[str, Any] | None:
+        if not self.is_enabled():
+            return None
+        try:
+            response = requests.get(
+                f"{self.base_url}/search",
+                params={
+                    "q": query,
+                    "format": "json",
+                    "language": _lang_code(language),
+                    "safesearch": 1,
+                },
+                timeout=12,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            return None
+
+        results: list[dict[str, str]] = []
+        for row in data.get("results") or []:
+            url = str(row.get("url") or "").strip()
+            title = str(row.get("title") or "").strip()
+            snippet = str(row.get("content") or "").strip()
+            if url or title:
+                results.append({"title": title[:160], "url": url, "snippet": snippet[:280]})
+            if len(results) >= max_results:
+                break
+
+        abstract = ""
+        answers = data.get("answers") or []
+        if isinstance(answers, list) and answers:
+            abstract = str(answers[0]).strip()
+        if not abstract:
+            infoboxes = data.get("infoboxes") or []
+            if isinstance(infoboxes, list) and infoboxes and isinstance(infoboxes[0], dict):
+                abstract = str(infoboxes[0].get("content") or "").strip()
+
+        if not results and not abstract:
+            return None
+        return {"results": results, "abstract": abstract, "provider": "searxng_local"}
+
+
 class TavilySearchProvider:
     def __init__(self) -> None:
         self.api_key = os.getenv("TAVILY_API_KEY", "").strip()
@@ -148,6 +201,7 @@ class WebSearchProviderChain:
     def __init__(self) -> None:
         self.mode = os.getenv("WEB_SEARCH_PROVIDER", "auto").strip().lower()
         self.providers: dict[str, Any] = {
+            "searxng": SearxngSearchProvider(),
             "tavily": TavilySearchProvider(),
             "serper": SerperSearchProvider(),
             "brave": BraveSearchProvider(),
@@ -161,7 +215,7 @@ class WebSearchProviderChain:
             return [self.mode]
         if self.mode == "fallback":
             return []
-        return ["tavily", "serper", "brave"]
+        return ["searxng", "tavily", "serper", "brave"]
 
     def search(self, query: str, max_results: int = 6, language: str = "Français") -> dict[str, Any] | None:
         for name in self._ordered_names():

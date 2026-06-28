@@ -163,6 +163,24 @@ class AdminCreateUserPayload(BaseModel):
     department: str
     employee_id: str = ""
     password: str = ""
+    send_email_otp: bool = True
+    send_sms_otp: bool = True
+    force_password_change: bool = False
+    allowed_regions: str = "National"
+    allowed_vendors: str = "nokia,huawei"
+
+
+class LoginSecurityVerifyPayload(BaseModel):
+    user_id: int
+    email_code: str
+
+
+class LoginSecurityResendPayload(BaseModel):
+    user_id: int
+
+
+class LoginMfaResendPayload(BaseModel):
+    user_id: int
 
 
 class AdminVerifyUserPayload(BaseModel):
@@ -251,6 +269,10 @@ class RegisterPayload(BaseModel):
     email: str = Field(..., min_length=5, max_length=254)
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str = Field(..., min_length=2, max_length=120)
+    phone: str = Field(..., min_length=8, max_length=32)
+    job_profile: str = Field(..., min_length=2, max_length=64)
+    department: str = Field(default="", max_length=120)
+    employee_id: str = Field(default="", max_length=32)
 
 
 class LoginPayload(BaseModel):

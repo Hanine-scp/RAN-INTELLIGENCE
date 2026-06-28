@@ -85,3 +85,35 @@ def password_reset_email(
         brand,
     )
     return subject, text, html
+
+
+def failed_login_alert_email(
+    *,
+    full_name: str,
+    failed_attempts: int,
+    brand: str,
+    login_url: str,
+) -> tuple[str, str, str]:
+    subject = f"{brand} — Alerte de sécurité connexion"
+    text = (
+        f"Bonjour {full_name},\n\n"
+        f"{failed_attempts} tentatives de connexion incorrectes ont été détectées sur votre compte.\n"
+        f"Un code de vérification a été envoyé par email. Saisissez-le sur la page de connexion "
+        f"avant de réessayer.\n\n"
+        f"Si vous n'êtes pas à l'origine de ces tentatives, contactez immédiatement votre administrateur.\n"
+        f"Page de connexion : {login_url}\n\n— {brand}"
+    )
+    html = _shell(
+        "Alerte sécurité",
+        f"<p>Bonjour <strong>{full_name}</strong>,</p>"
+        f"<p><strong>{failed_attempts} tentatives de connexion incorrectes</strong> ont été détectées "
+        f"sur votre compte {brand}.</p>"
+        f"<p>Un code de vérification a été envoyé par email. Saisissez-le sur la page de connexion "
+        f"avant de réessayer.</p>"
+        f'<p style="text-align:center;margin:28px 0;">'
+        f'<a href="{login_url}" style="background:#ed1c24;color:#fff;padding:14px 28px;border-radius:6px;'
+        f'text-decoration:none;font-weight:bold;display:inline-block;">Ouvrir la connexion</a></p>'
+        f"<p>Si vous n'êtes pas à l'origine de ces tentatives, contactez immédiatement votre administrateur.</p>",
+        brand,
+    )
+    return subject, text, html

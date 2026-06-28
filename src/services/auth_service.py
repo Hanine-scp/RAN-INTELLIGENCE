@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import os
 import re
 import secrets
@@ -20,10 +22,19 @@ from src.services.auth_database import (
     init_auth_schema,
     use_postgres,
 )
-from src.services.platform_activity_service import init_platform_tables
+from src.services.access_control import (
+    clamp_vendor,
+    parse_allowed_regions,
+    parse_allowed_vendors,
+    permissions_for,
+    vendor_allowed,
+)
 from src.services.feature_flags import feature_flags
-from src.services.notification_service import TWILIO_VERIFY_MARKER, notification_service
+from src.services.notification_service import TWILIO_VERIFY_MARKER, VONAGE_VERIFY_PREFIX, notification_service
+from src.services.n8n_service import n8n_service
+from src.services.platform_activity_service import init_platform_tables
 
+logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET = os.getenv("AUTH_JWT_SECRET") or os.getenv("JWT_SECRET", "change-me-ran-intelligence-internal")
 JWT_ALGORITHM = "HS256"
@@ -32,10 +43,28 @@ OTP_MINUTES = int(os.getenv("AUTH_OTP_MINUTES", "10"))
 OTP_RESEND_SECONDS = int(os.getenv("AUTH_OTP_RESEND_SECONDS", "59"))
 OTP_MAX_PER_HOUR = int(os.getenv("AUTH_OTP_MAX_PER_HOUR", "5"))
 AUTH_DEV_MODE = os.getenv("AUTH_DEV_MODE", "true").lower() in {"1", "true", "yes"}
+AUTH_SKIP_OTP = os.getenv("AUTH_SKIP_OTP", "false").lower() in {"1", "true", "yes"}
 EMAIL_VERIFY_HOURS = int(os.getenv("AUTH_EMAIL_VERIFY_HOURS", "24"))
 PASSWORD_RESET_HOURS = int(os.getenv("AUTH_PASSWORD_RESET_HOURS", "1"))
 FRONTEND_URL = os.getenv("APP_FRONTEND_URL", os.getenv("FRONTEND_URL", "http://localhost:3000")).rstrip("/")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_FAILED_LOGIN_ATTEMPTS = int(os.getenv("AUTH_MAX_FAILED_LOGIN_ATTEMPTS", "2"))
+
+
+class SecurityVerificationRequired(Exception):
+    def __init__(
+        self,
+        *,
+        user_id: int,
+        message: str,
+        verification: dict[str, Any],
+        failed_attempts: int,
+    ) -> None:
+        self.user_id = user_id
+        self.message = message
+        self.verification = verification
+        self.failed_attempts = failed_attempts
+        super().__init__(message)
 
 
 def _parse_jwt_expires_minutes(value: str) -> int:
@@ -101,6 +130,15 @@ class AuthUser:
     email_verified: bool
     phone_verified: bool
     is_active: bool
+    department: str = ""
+    allowed_regions: list[str] | None = None
+    allowed_vendors: list[str] | None = None
+    failed_login_attempts: int = 0
+    login_security_required: bool = False
+    must_change_password: bool = False
+    last_login_at: str | None = None
+    last_login_ip: str | None = None
+    last_login_user_agent: str | None = None
 
 
 def _utcnow() -> datetime:
@@ -149,9 +187,13 @@ class AuthService:
 
         with self._connect() as conn:
             if seed_admin:
-                admin_email = os.getenv("ADMIN_EMAIL", "admin@ooredoo.ran").strip().lower()
-                admin_password = os.getenv("ADMIN_PASSWORD", "Admin@RAN2026!")
-                admin_phone = os.getenv("ADMIN_PHONE", "21600000000")
+                admin_email = os.getenv("ADMIN_EMAIL", "hbenahmed2001@gmail.com").strip().lower()
+                admin_password = os.getenv("ADMIN_PASSWORD", "")
+                if not admin_password:
+                    admin_password = "change-me-admin-password"
+                admin_phone = notification_service.format_phone_e164(
+                    os.getenv("ADMIN_PHONE", "+21623669609")
+                )
                 admin_name = os.getenv("ADMIN_NAME", "Administrateur RAN")
                 row = conn.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1").fetchone()
                 if row is None:
@@ -208,23 +250,122 @@ class AuthService:
             (user_id, action, detail, _iso(_utcnow())),
         )
 
-    def _permissions_for_role(self, role: str) -> list[str]:
-        return ADMIN_PERMISSIONS if role == "admin" else USER_PERMISSIONS
+    def _permissions_for_role(self, role: str, job_profile: str = "") -> list[str]:
+        return permissions_for(role, job_profile)
 
     def _row_to_user(self, row: DbRow) -> AuthUser:
         role = str(row["role"])
+        job_profile = str(row["job_profile"] or "")
+        allowed_vendors = parse_allowed_vendors(str(row.get("allowed_vendors") or ""))
+        allowed_regions = parse_allowed_regions(str(row.get("allowed_regions") or ""))
         return AuthUser(
             id=int(row["id"]),
             email=str(row["email"]),
             phone=str(row["phone"]),
             full_name=str(row["full_name"]),
             role=role,
-            job_profile=str(row["job_profile"] or ""),
-            permissions=self._permissions_for_role(role),
+            job_profile=job_profile,
+            permissions=self._permissions_for_role(role, job_profile),
             email_verified=bool(row["email_verified"]),
             phone_verified=bool(row["phone_verified"]),
             is_active=bool(row["is_active"]),
+            department=str(row.get("department") or ""),
+            allowed_regions=allowed_regions,
+            allowed_vendors=allowed_vendors,
+            failed_login_attempts=self._user_int(row, "failed_login_attempts"),
+            login_security_required=bool(self._user_int(row, "login_security_required")),
+            must_change_password=bool(self._user_int(row, "must_change_password")),
+            last_login_at=str(row["last_login_at"]) if row.get("last_login_at") else None,
+            last_login_ip=str(row["last_login_ip"]) if row.get("last_login_ip") else None,
+            last_login_user_agent=str(row["last_login_user_agent"]) if row.get("last_login_user_agent") else None,
         )
+
+    def enforce_vendor_scope(self, user: AuthUser, requested_vendor: str) -> str:
+        if user.role == "admin":
+            return (requested_vendor or "nokia").strip().lower()
+        allowed = user.allowed_vendors or parse_allowed_vendors("")
+        vendor = (requested_vendor or "nokia").strip().lower()
+        if not vendor_allowed(vendor, allowed):
+            raise ValueError(f"Vendor '{vendor}' not allowed for this account")
+        return clamp_vendor(vendor, allowed)
+
+    def security_center_summary(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            users = conn.execute("SELECT * FROM users").fetchall()
+            audits = conn.execute(
+                """
+                SELECT action, detail, created_at, user_id
+                FROM auth_audit
+                ORDER BY id DESC
+                LIMIT 200
+                """
+            ).fetchall()
+        today_prefix = _iso(_utcnow())[:10]
+        failed_today = 0
+        security_locked = 0
+        pending_otp = 0
+        active_users = 0
+        active_admins = 0
+        for row in users:
+            role = str(row["role"])
+            active = bool(row["is_active"])
+            email_ok = bool(row["email_verified"])
+            phone_ok = bool(row["phone_verified"])
+            if active and email_ok and (role == "admin" or phone_ok):
+                if role == "admin":
+                    active_admins += 1
+                else:
+                    active_users += 1
+            elif role == "responsable" and (not active or not email_ok or not phone_ok):
+                pending_otp += 1
+            if self._user_int(row, "login_security_required"):
+                security_locked += 1
+        recent_events: list[dict[str, Any]] = []
+        for row in audits:
+            action = str(row["action"])
+            created = str(row["created_at"])
+            if action == "login_failed" and created.startswith(today_prefix):
+                failed_today += 1
+            if action in {
+                "login_failed",
+                "login_security_required",
+                "login_security_verified",
+                "access_denied",
+                "admin_user_created",
+                "user_status_changed",
+                "login_success",
+            }:
+                recent_events.append(
+                    {
+                        "action": action,
+                        "detail": str(row["detail"] or ""),
+                        "created_at": created,
+                        "user_id": row["user_id"],
+                    }
+                )
+        return {
+            "failed_logins_today": failed_today,
+            "security_locked_accounts": security_locked,
+            "pending_otp_accounts": pending_otp,
+            "active_users": active_users,
+            "active_admins": active_admins,
+            "total_accounts": len(users),
+            "recent_security_events": recent_events[:40],
+        }
+
+    def list_auth_audit(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.id, a.user_id, a.action, a.detail, a.created_at, u.email, u.full_name, u.role
+                FROM auth_audit a
+                LEFT JOIN users u ON u.id = a.user_id
+                ORDER BY a.id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def _rotate_personal_access_key(self, conn: AuthDbConnection, user_id: int) -> str:
         new_key = secrets.token_urlsafe(16).upper()
@@ -234,7 +375,14 @@ class AuthService:
         )
         return new_key
 
-    def _issue_tokens(self, user: AuthUser, *, session_access_key: str | None = None) -> dict[str, Any]:
+    def _issue_tokens(
+        self,
+        user: AuthUser,
+        *,
+        session_access_key: str | None = None,
+        login_ip: str | None = None,
+        login_user_agent: str | None = None,
+    ) -> dict[str, Any]:
         now = _utcnow()
         access_payload = {
             "sub": str(user.id),
@@ -259,8 +407,20 @@ class AuthService:
                 """,
                 (user.id, _hash_secret(refresh_value), _iso(now + timedelta(days=REFRESH_TOKEN_DAYS)), _iso(now)),
             )
-            conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (_iso(now), user.id))
-            self._audit(conn, user.id, "login_success")
+            conn.execute(
+                """
+                UPDATE users
+                SET last_login_at = ?, last_login_ip = ?, last_login_user_agent = ?
+                WHERE id = ?
+                """,
+                (_iso(now), (login_ip or "")[:64], (login_user_agent or "")[:512], user.id),
+            )
+            self._audit(
+                conn,
+                user.id,
+                "login_success",
+                json.dumps({"ip": login_ip, "ua": (login_user_agent or "")[:120]}, ensure_ascii=False),
+            )
         payload: dict[str, Any] = {
             "access_token": jwt.encode(access_payload, JWT_SECRET, algorithm=JWT_ALGORITHM),
             "refresh_token": refresh_value,
@@ -284,6 +444,15 @@ class AuthService:
             "email_verified": user.email_verified,
             "phone_verified": user.phone_verified,
             "is_active": user.is_active,
+            "department": user.department,
+            "allowed_regions": user.allowed_regions or [],
+            "allowed_vendors": user.allowed_vendors or [],
+            "failed_login_attempts": user.failed_login_attempts,
+            "login_security_required": user.login_security_required,
+            "must_change_password": user.must_change_password,
+            "last_login_at": user.last_login_at,
+            "last_login_ip": user.last_login_ip,
+            "last_login_user_agent": user.last_login_user_agent,
         }
 
     def decode_token(self, token: str, expected_type: str = "access") -> dict[str, Any]:
@@ -424,11 +593,9 @@ class AuthService:
         dev_phone_code: str | None,
         resend_remaining: int = OTP_RESEND_SECONDS,
     ) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "email_expires_at": email_expires,
             "phone_expires_at": phone_expires,
-            "dev_email_code": dev_email_code,
-            "dev_phone_code": dev_phone_code,
             "contact": {
                 "email_masked": self._mask_email(email),
                 "phone_masked": self._mask_phone(phone),
@@ -436,12 +603,299 @@ class AuthService:
             "resend_after_seconds": max(resend_remaining, 0),
             "otp_expires_minutes": OTP_MINUTES,
         }
+        if AUTH_DEV_MODE:
+            payload["dev_email_code"] = dev_email_code
+            payload["dev_phone_code"] = dev_phone_code
+        return payload
+
+    def _dev_otp_payload(
+        self,
+        *,
+        email_code: str | None = None,
+        phone_code: str | None = None,
+    ) -> dict[str, str]:
+        if not AUTH_DEV_MODE:
+            return {}
+        payload: dict[str, str] = {}
+        if email_code:
+            payload["dev_email_code"] = email_code
+        if phone_code:
+            payload["dev_phone_code"] = phone_code
+        return payload
+
+    def _user_int(self, row: DbRow, key: str, default: int = 0) -> int:
+        try:
+            value = row[key]
+        except (KeyError, IndexError):
+            return default
+        if value is None:
+            return default
+        return int(value)
+
+    def _login_security_required(self, row: DbRow) -> bool:
+        return bool(self._user_int(row, "login_security_required"))
+
+    def _must_change_password(self, row: DbRow) -> bool:
+        return bool(self._user_int(row, "must_change_password"))
+
+    def _build_login_security_verification(
+        self,
+        conn: AuthDbConnection,
+        row: DbRow,
+        *,
+        email_expires: str | None = None,
+        dev_email_code: str | None = None,
+    ) -> dict[str, Any]:
+        user_id = int(row["id"])
+        resend_remaining = self._otp_resend_remaining_seconds(conn, user_id, "login_security")
+        return self._verification_payload(
+            email=str(row["email"]),
+            phone=str(row.get("phone") or ""),
+            email_expires=email_expires or "",
+            phone_expires=None,
+            dev_email_code=dev_email_code,
+            dev_phone_code=None,
+            resend_remaining=resend_remaining,
+        )
+
+    def _raise_login_security_required(
+        self,
+        conn: AuthDbConnection,
+        row: DbRow,
+        *,
+        email_expires: str | None = None,
+        dev_email_code: str | None = None,
+        failed_attempts: int | None = None,
+    ) -> None:
+        user_id = int(row["id"])
+        verification = self._build_login_security_verification(
+            conn,
+            row,
+            email_expires=email_expires,
+            dev_email_code=dev_email_code,
+        )
+        raise SecurityVerificationRequired(
+            user_id=user_id,
+            message="Pour votre sécurité, vérifiez votre identité par email avant de vous reconnecter.",
+            verification=verification,
+            failed_attempts=failed_attempts or self._user_int(row, "failed_login_attempts"),
+        )
+
+    def _trigger_login_security(self, conn: AuthDbConnection, row: DbRow) -> None:
+        user_id = int(row["id"])
+        conn.execute("UPDATE users SET login_security_required = 1 WHERE id = ?", (user_id,))
+        email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "login_security")
+        notification_service.send_failed_login_alert(
+            to=str(row["email"]),
+            full_name=str(row["full_name"]),
+            failed_attempts=self._user_int(row, "failed_login_attempts"),
+            user_id=user_id,
+        )
+        self._audit(conn, user_id, "login_security_required", str(MAX_FAILED_LOGIN_ATTEMPTS))
+        self._raise_login_security_required(
+            conn,
+            row,
+            email_expires=email_expires,
+            dev_email_code=email_code,
+            failed_attempts=MAX_FAILED_LOGIN_ATTEMPTS,
+        )
+
+    def _record_failed_login(
+        self,
+        conn: AuthDbConnection,
+        row: DbRow,
+        *,
+        invalid_message: str = "Invalid email or password",
+    ) -> None:
+        user_id = int(row["id"])
+        attempts = self._user_int(row, "failed_login_attempts") + 1
+        now = _iso(_utcnow())
+        conn.execute(
+            "UPDATE users SET failed_login_attempts = ?, last_failed_login_at = ? WHERE id = ?",
+            (attempts, now, user_id),
+        )
+        updated = dict(row)
+        updated["failed_login_attempts"] = attempts
+        self._audit(conn, user_id, "login_failed", str(attempts))
+        if attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+            self._trigger_login_security(conn, updated)
+        raise ValueError(invalid_message)
+
+    def _assert_login_security_cleared(self, conn: AuthDbConnection, row: DbRow) -> None:
+        if self._login_security_required(row):
+            self._raise_login_security_required(conn, row)
+
+    def _clear_login_failures(self, conn: AuthDbConnection, user_id: int) -> None:
+        conn.execute(
+            """
+            UPDATE users
+            SET failed_login_attempts = 0, login_security_required = 0, last_failed_login_at = NULL
+            WHERE id = ?
+            """,
+            (user_id,),
+        )
+
+    def _authenticate_password(
+        self,
+        conn: AuthDbConnection,
+        row: DbRow | None,
+        password: str,
+        *,
+        invalid_message: str,
+    ) -> DbRow:
+        if row is None or not pwd_context.verify(password, str(row["password_hash"])):
+            if row is not None:
+                self._record_failed_login(conn, row, invalid_message=invalid_message)
+            raise ValueError(invalid_message)
+        self._assert_login_security_cleared(conn, row)
+        return row
+
+    def _has_active_otp(self, conn: AuthDbConnection, user_id: int, channel: str, purpose: str) -> bool:
+        row = conn.execute(
+            """
+            SELECT 1 FROM otp_codes
+            WHERE user_id = ? AND channel = ? AND purpose = ? AND consumed_at IS NULL AND expires_at > ?
+            LIMIT 1
+            """,
+            (user_id, channel, purpose, _iso(_utcnow())),
+        ).fetchone()
+        return row is not None
+
+    def verify_login_security(self, *, user_id: int, email_code: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            if row is None:
+                raise ValueError("User not found")
+            if not self._login_security_required(row):
+                return {"message": "Aucune vérification de sécurité requise.", "cleared": True}
+            self._verify_otp(conn, user_id, "email", "login_security", email_code)
+            self._clear_login_failures(conn, user_id)
+            self._audit(conn, user_id, "login_security_verified")
+        return {
+            "message": "Identité vérifiée. Vous pouvez vous reconnecter.",
+            "cleared": True,
+        }
+
+    def resend_login_security_otp(self, *, user_id: int) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            if row is None:
+                raise ValueError("User not found")
+            if not self._login_security_required(row):
+                raise ValueError("Aucune vérification de sécurité en cours")
+            self._enforce_otp_resend_cooldown(conn, user_id, "login_security")
+            email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "login_security")
+            resend_remaining = self._otp_resend_remaining_seconds(conn, user_id, "login_security")
+            self._audit(conn, user_id, "login_security_otp_resent")
+        return {
+            "user_id": user_id,
+            "message": "Nouveau code de sécurité envoyé par email." if email_sent else "",
+            "notifications": {"email_otp": email_sent},
+            "verification": self._verification_payload(
+                email=str(row["email"]),
+                phone=str(row.get("phone") or ""),
+                email_expires=email_expires,
+                phone_expires=None,
+                dev_email_code=email_code,
+                dev_phone_code=None,
+                resend_remaining=resend_remaining,
+            ),
+        }
+
+    def resend_login_mfa_otp(self, *, user_id: int, role: str = "responsable") -> dict[str, Any]:
+        purpose = "login_mfa" if role == "responsable" else "admin_login"
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE id = ? AND role = ?",
+                (user_id, role),
+            ).fetchone()
+            if row is None:
+                raise ValueError("User not found")
+            self._enforce_otp_resend_cooldown(conn, user_id, purpose)
+            email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", purpose)
+            phone_expires, phone_code, phone_sent = (None, None, False)
+            requires_sms = bool(str(row.get("phone") or "").strip())
+            if role == "admin" or requires_sms:
+                phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", purpose)
+            self._require_otp_delivery(channel="email", requested=True, sent=email_sent)
+            self._require_otp_delivery(channel="phone", requested=(role == "admin" or requires_sms), sent=phone_sent)
+            resend_remaining = self._otp_resend_remaining_seconds(conn, user_id, purpose)
+            self._audit(conn, user_id, f"{purpose}_resent")
+        return {
+            "user_id": user_id,
+            "message": "Nouveaux codes envoyés." if (email_sent or phone_sent) else "",
+            "requires_sms": requires_sms if role == "responsable" else True,
+            "notifications": {"email_otp": email_sent, "sms_otp": phone_sent},
+            "verification": self._verification_payload(
+                email=str(row["email"]),
+                phone=str(row.get("phone") or ""),
+                email_expires=email_expires,
+                phone_expires=phone_expires,
+                dev_email_code=email_code,
+                dev_phone_code=phone_code,
+                resend_remaining=resend_remaining,
+            ),
+        }
+
+    def _require_otp_delivery(self, *, channel: str, requested: bool, sent: bool) -> None:
+        if not requested or sent:
+            return
+        if AUTH_DEV_MODE:
+            logger.warning(
+                "OTP %s non envoyé — mode dev : codes affichés dans l'interface. "
+                "Configurez Mailtrap/Vonage dans .env.auth pour des envois réels.",
+                channel,
+            )
+            return
+        if channel == "email":
+            raise ValueError(
+                "Impossible d'envoyer l'OTP par email. "
+                "Configurez Mailtrap Live SMTP dans .env.auth : "
+                "MAILTRAP_API_TOKEN (ou SMTP_PASS), SMTP_HOST=live.smtp.mailtrap.io, "
+                "SMTP_USER=api, SMTP_FROM avec un domaine vérifié."
+            )
+        raise ValueError(
+            "Impossible d'envoyer l'OTP par SMS. "
+            "Configurez Vonage Verify dans .env.auth : "
+            "SMS_PROVIDER=vonage, VONAGE_API_KEY, VONAGE_API_SECRET, VONAGE_BRAND (max 18 car.). "
+            "Numéro utilisateur au format E.164 (+216...)."
+        )
+
+    def _twilio_verify_channel(self, channel: str) -> str:
+        return "sms" if channel == "phone" else "email"
 
     def _issue_otp(self, conn: AuthDbConnection, user_id: int, channel: str, purpose: str) -> tuple[str, str | None, bool]:
         self._check_otp_rate_limit(conn, user_id, channel)
         email, phone, full_name = self._user_contact(conn, user_id)
+        destination = phone if channel == "phone" else email
+        verify_channel = self._twilio_verify_channel(channel)
+
+        # SMS : Vonage Verify (prioritaire) puis Twilio Verify
+        if channel == "phone" and notification_service.vonage_verify_ready():
+            request_id = notification_service.start_vonage_verify(
+                phone=destination,
+                purpose=purpose,
+                user_id=user_id,
+            )
+            if request_id:
+                expires = _iso(_utcnow() + timedelta(minutes=OTP_MINUTES))
+                marker = f"{VONAGE_VERIFY_PREFIX}{request_id}"
+                conn.execute(
+                    """
+                    INSERT INTO otp_codes (user_id, channel, code_hash, purpose, expires_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (user_id, channel, marker, purpose, expires, _iso(_utcnow())),
+                )
+                return expires, None, True
+
         if channel == "phone" and notification_service.twilio_verify_ready():
-            sent = notification_service.start_twilio_verify(phone=phone, purpose=purpose, user_id=user_id)
+            sent = notification_service.start_twilio_verify(
+                destination=destination,
+                channel=verify_channel,
+                purpose=purpose,
+                user_id=user_id,
+            )
             if sent:
                 expires = _iso(_utcnow() + timedelta(minutes=OTP_MINUTES))
                 conn.execute(
@@ -452,6 +906,30 @@ class AuthService:
                     (user_id, channel, TWILIO_VERIFY_MARKER, purpose, expires, _iso(_utcnow())),
                 )
                 return expires, None, True
+
+        # Email : SMTP Mailtrap en priorité ; Twilio Verify email seulement si SMTP absent
+        if (
+            channel == "email"
+            and not notification_service.email_ready()
+            and notification_service.twilio_verify_ready()
+        ):
+            sent = notification_service.start_twilio_verify(
+                destination=destination,
+                channel=verify_channel,
+                purpose=purpose,
+                user_id=user_id,
+            )
+            if sent:
+                expires = _iso(_utcnow() + timedelta(minutes=OTP_MINUTES))
+                conn.execute(
+                    """
+                    INSERT INTO otp_codes (user_id, channel, code_hash, purpose, expires_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (user_id, channel, TWILIO_VERIFY_MARKER, purpose, expires, _iso(_utcnow())),
+                )
+                return expires, None, True
+
         expires, code = self._create_otp(conn, user_id, channel, purpose)
         sent = notification_service.deliver_otp(
             channel=channel,
@@ -497,9 +975,28 @@ class AuthService:
         if _utcnow() > expires_at:
             raise ValueError("OTP expired")
         normalized = self._normalize_otp_input(channel, code)
-        if str(row["code_hash"]) == TWILIO_VERIFY_MARKER and channel == "phone":
-            _, phone, _ = self._user_contact(conn, user_id)
-            if not notification_service.check_twilio_verify(phone=phone, code=normalized, purpose=purpose, user_id=user_id):
+        code_hash = str(row["code_hash"])
+        if code_hash.startswith(VONAGE_VERIFY_PREFIX):
+            request_id = code_hash[len(VONAGE_VERIFY_PREFIX) :]
+            if not notification_service.check_vonage_verify(
+                request_id=request_id,
+                code=normalized,
+                purpose=purpose,
+                user_id=user_id,
+            ):
+                raise ValueError("Invalid OTP")
+            conn.execute("UPDATE otp_codes SET consumed_at = ? WHERE id = ?", (_iso(_utcnow()), row["id"]))
+            return
+        if code_hash == TWILIO_VERIFY_MARKER:
+            user_email, user_phone, _ = self._user_contact(conn, user_id)
+            destination = user_phone if channel == "phone" else user_email
+            if not notification_service.check_twilio_verify(
+                destination=destination,
+                channel=self._twilio_verify_channel(channel),
+                code=normalized,
+                purpose=purpose,
+                user_id=user_id,
+            ):
                 raise ValueError("Invalid OTP")
             conn.execute("UPDATE otp_codes SET consumed_at = ? WHERE id = ?", (_iso(_utcnow()), row["id"]))
             return
@@ -599,7 +1096,7 @@ class AuthService:
             "user_id": user_id,
             "message": "Compte admin créé. Vérifiez votre email et SMS pour activer le compte."
             if delivered
-            else "Compte admin créé. Configurez SMTP/Twilio pour recevoir les codes.",
+            else "Compte admin créé. Configurez SMTP/Vonage pour recevoir les codes.",
             "notifications": {"email_otp": email_sent, "sms_otp": phone_sent, "welcome_email": welcome_sent},
             "verification": self._verification_payload(
                 email=email_norm,
@@ -688,8 +1185,8 @@ class AuthService:
         phone_norm = _normalize_phone(phone) if phone else ""
         if not full_name.strip():
             raise ValueError("Full name is required")
-        if phone_norm and len(phone_norm) < 8:
-            raise ValueError("Invalid phone number")
+        if not phone_norm or len(phone_norm) < 8:
+            raise ValueError("Phone number is required (format international +216...)")
         if job_profile not in USER_JOB_PROFILES:
             raise ValueError("Invalid job profile")
         if len(password) < 10:
@@ -710,7 +1207,7 @@ class AuthService:
                 INSERT INTO users (
                     email, phone, password_hash, full_name, role, job_profile,
                     personal_access_key_hash, email_verified, phone_verified, is_active, created_at
-                ) VALUES (?, ?, ?, ?, 'user', ?, ?, 0, 0, 0, ?)
+                ) VALUES (?, ?, ?, ?, 'responsable', ?, ?, 0, 0, 0, ?)
                 """,
                 (
                     email_norm,
@@ -725,8 +1222,9 @@ class AuthService:
             user_id = conn.execute("SELECT id FROM users WHERE email = ?", (email_norm,)).fetchone()["id"]
             self._consume_access_key(conn, int(key_row["id"]))
             email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "signup_verify")
-            if phone_norm:
-                phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "signup_verify")
+            phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "signup_verify")
+            self._require_otp_delivery(channel="email", requested=True, sent=email_sent)
+            self._require_otp_delivery(channel="phone", requested=True, sent=phone_sent)
             welcome_sent = notification_service.send_account_welcome_email(
                 to=email_norm,
                 full_name=full_name.strip(),
@@ -735,13 +1233,19 @@ class AuthService:
             self._audit(conn, user_id, "signup_started", job_profile)
 
         delivered = email_sent or phone_sent or welcome_sent
+        if AUTH_DEV_MODE and not (email_sent and phone_sent):
+            message = (
+                "Compte créé. Codes OTP affichés ci-dessous (mode dev — configurez Mailtrap/Vonage pour envoi réel)."
+            )
+        elif email_sent and phone_sent:
+            message = "Compte créé. Codes OTP envoyés par email et SMS."
+        elif email_sent or phone_sent:
+            message = "Compte créé. Consultez votre email et SMS pour les codes de vérification."
+        else:
+            message = "Compte créé. Vérifiez votre email."
         return {
             "user_id": user_id,
-            "message": "Compte créé. Consultez votre email et SMS pour les codes de vérification."
-            if phone_sent
-            else "Compte créé. Un email a été envoyé."
-            if delivered
-            else "Compte créé. Vérifiez votre email.",
+            "message": message,
             "personal_access_key": self._expose_secret(personal_key, welcome_sent),
             "notifications": {
                 "email_otp": email_sent,
@@ -751,15 +1255,14 @@ class AuthService:
             "verification": {
                 "email_expires_at": email_expires,
                 "phone_expires_at": phone_expires,
-                "dev_email_code": email_code,
-                "dev_phone_code": phone_code,
+                **self._dev_otp_payload(email_code=email_code, phone_code=phone_code),
             },
         }
 
     def resend_signup_otp(self, *, user_id: int) -> dict[str, Any]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, is_active, phone FROM users WHERE id = ? AND role = 'user'",
+                "SELECT id, is_active, phone FROM users WHERE id = ? AND role = 'responsable'",
                 (user_id,),
             ).fetchone()
             if row is None:
@@ -775,21 +1278,20 @@ class AuthService:
                     (_iso(_utcnow()), user_id, channel),
                 )
             email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "signup_verify")
-            phone_expires: str | None = None
-            phone_code: str | None = None
-            phone_sent = False
-            if str(row["phone"] or "").strip():
-                phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "signup_verify")
+            phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "signup_verify")
+            self._require_otp_delivery(channel="email", requested=True, sent=email_sent)
+            self._require_otp_delivery(channel="phone", requested=True, sent=phone_sent)
             self._audit(conn, user_id, "signup_otp_resent")
         return {
             "user_id": user_id,
-            "message": "Nouveaux codes générés.",
+            "message": "Nouveaux codes OTP envoyés par email et SMS."
+            if email_sent and phone_sent
+            else "Nouveaux codes générés.",
             "notifications": {"email_otp": email_sent, "sms_otp": phone_sent},
             "verification": {
                 "email_expires_at": email_expires,
                 "phone_expires_at": phone_expires,
-                "dev_email_code": email_code,
-                "dev_phone_code": phone_code,
+                **self._dev_otp_payload(email_code=email_code, phone_code=phone_code),
             },
         }
 
@@ -799,7 +1301,7 @@ class AuthService:
             raise ValueError("Invalid phone number")
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, is_active, email FROM users WHERE id = ? AND role = 'user'",
+                "SELECT id, is_active, email FROM users WHERE id = ? AND role = 'responsable'",
                 (user_id,),
             ).fetchone()
             if row is None:
@@ -815,6 +1317,7 @@ class AuthService:
                 (_iso(_utcnow()), user_id),
             )
             phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "signup_verify")
+            self._require_otp_delivery(channel="phone", requested=True, sent=phone_sent)
             self._audit(conn, user_id, "signup_phone_set", phone_norm)
         return {
             "user_id": user_id,
@@ -823,13 +1326,13 @@ class AuthService:
             "notifications": {"sms_otp": phone_sent},
             "verification": {
                 "phone_expires_at": phone_expires,
-                "dev_phone_code": phone_code,
+                **self._dev_otp_payload(phone_code=phone_code),
             },
         }
 
     def verify_signup(self, *, user_id: int, email_code: str, phone_code: str) -> dict[str, Any]:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'user'", (user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'responsable'", (user_id,)).fetchone()
             if row is None:
                 raise ValueError("User not found")
             if not str(row["phone"] or "").strip():
@@ -858,21 +1361,38 @@ class AuthService:
     def login_user_step1(self, *, email: str, password: str) -> dict[str, Any]:
         email_norm = _normalize_email(email)
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE email = ? AND role = 'user'", (email_norm,)).fetchone()
-            if row is None or not pwd_context.verify(password, str(row["password_hash"])):
-                raise ValueError("Invalid credentials")
+            row = conn.execute("SELECT * FROM users WHERE email = ? AND role = 'responsable'", (email_norm,)).fetchone()
+            row = self._authenticate_password(conn, row, password, invalid_message="Invalid credentials")
             if not bool(row["is_active"]):
                 raise ValueError("Account pending verification")
             user_id = int(row["id"])
+            self._clear_login_failures(conn, user_id)
             requires_sms = bool(str(row["phone"] or "").strip())
-            email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "login_mfa")
-            phone_expires, phone_code, phone_sent = (None, None, False)
-            if requires_sms:
-                phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "login_mfa")
-            resend_remaining = self._otp_resend_remaining_seconds(conn, user_id, "login_mfa")
-            user_email = str(row["email"])
-            user_phone = str(row["phone"] or "")
-            self._audit(conn, user_id, "login_user_step1")
+            if AUTH_SKIP_OTP:
+                self._audit(conn, user_id, "login_user_step1_otp_skipped")
+                skip_otp = True
+            else:
+                skip_otp = False
+                email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "login_mfa")
+                phone_expires, phone_code, phone_sent = (None, None, False)
+                if requires_sms:
+                    phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "login_mfa")
+                self._require_otp_delivery(channel="email", requested=True, sent=email_sent)
+                self._require_otp_delivery(channel="phone", requested=requires_sms, sent=phone_sent)
+                resend_remaining = self._otp_resend_remaining_seconds(conn, user_id, "login_mfa")
+                user_email = str(row["email"])
+                user_phone = str(row["phone"] or "")
+                self._audit(conn, user_id, "login_user_step1")
+        if skip_otp:
+            must_change = self._must_change_password(row)
+            user = self.get_user_by_id(user_id)
+            if not user:
+                raise ValueError("User not found")
+            tokens = self._issue_tokens(user)
+            tokens["mfa_required"] = False
+            if must_change:
+                tokens["must_change_password"] = True
+            return tokens
         return {
             "user_id": user_id,
             "mfa_required": True,
@@ -898,10 +1418,12 @@ class AuthService:
         }
 
     def login_user_step2(self, *, user_id: int, email_code: str, phone_code: str) -> dict[str, Any]:
+        must_change = False
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'user'", (user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'responsable'", (user_id,)).fetchone()
             if row is None:
                 raise ValueError("User not found")
+            must_change = self._must_change_password(row)
             self._verify_otp(conn, user_id, "email", "login_mfa", email_code)
             phone = str(row["phone"] or "").strip()
             if phone:
@@ -921,6 +1443,8 @@ class AuthService:
         tokens["notifications"] = key_delivery
         if key_delivery["email"] or key_delivery["sms"]:
             tokens["message"] = "Connexion réussie. Votre nouvelle clé d'accès a été envoyée par email et SMS."
+        if must_change:
+            tokens["must_change_password"] = True
         return tokens
 
     def login_admin_step1(self, *, email: str, password: str, master_key: str) -> dict[str, Any]:
@@ -928,22 +1452,44 @@ class AuthService:
         with self._connect() as conn:
             self._validate_access_key(conn, master_key.strip(), "admin_login")
             row = conn.execute("SELECT * FROM users WHERE email = ? AND role = 'admin'", (email_norm,)).fetchone()
-            if row is None or not pwd_context.verify(password, str(row["password_hash"])):
-                raise ValueError("Invalid admin credentials")
+            row = self._authenticate_password(conn, row, password, invalid_message="Invalid admin credentials")
             if not bool(row["is_active"]):
                 raise ValueError("Admin account pending verification")
             user_id = int(row["id"])
-            email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "admin_login")
-            phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "admin_login")
-            resend_remaining = self._otp_resend_remaining_seconds(conn, user_id, "admin_login")
-            user_email = str(row["email"])
-            user_phone = str(row["phone"] or "")
-            self._audit(conn, user_id, "login_admin_step1")
+            self._clear_login_failures(conn, user_id)
+            if AUTH_SKIP_OTP:
+                self._audit(conn, user_id, "login_admin_step1_otp_skipped")
+                skip_otp = True
+            else:
+                skip_otp = False
+                email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "admin_login")
+                phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "admin_login")
+                self._require_otp_delivery(channel="email", requested=True, sent=email_sent)
+                self._require_otp_delivery(channel="phone", requested=True, sent=phone_sent)
+                resend_remaining = self._otp_resend_remaining_seconds(conn, user_id, "admin_login")
+                user_email = str(row["email"])
+                user_phone = str(row["phone"] or "")
+                self._audit(conn, user_id, "login_admin_step1")
+        if skip_otp:
+            user = self.get_user_by_id(user_id)
+            if not user:
+                raise ValueError("Admin not found")
+            tokens = self._issue_tokens(user)
+            tokens["mfa_required"] = False
+            return tokens
         return {
             "user_id": user_id,
             "mfa_required": True,
             "channels": ["email", "phone"],
-            "message": "Codes de validation envoyés par email et SMS." if (email_sent or phone_sent) else "",
+            "message": "Codes de validation envoyés par email et SMS."
+            if email_sent and phone_sent
+            else (
+                "Code email envoyé — consultez votre boîte mail."
+                if email_sent
+                else "Code SMS envoyé — consultez votre téléphone."
+                if phone_sent
+                else "Codes de validation requis."
+            ),
             "notifications": {"email_otp": email_sent, "sms_otp": phone_sent},
             "verification": self._verification_payload(
                 email=user_email,
@@ -1016,6 +1562,11 @@ class AuthService:
         department: str = "",
         employee_id: str = "",
         password: str = "",
+        send_email_otp: bool = True,
+        send_sms_otp: bool = True,
+        force_password_change: bool = False,
+        allowed_regions: str = "National",
+        allowed_vendors: str = "nokia,huawei",
     ) -> dict[str, Any]:
         email_norm = _normalize_email(email)
         phone_norm = _normalize_phone(phone)
@@ -1031,6 +1582,8 @@ class AuthService:
         temp_password = password.strip() or self._generate_temp_password()
         if len(temp_password) < 10:
             raise ValueError("Password must be at least 10 characters")
+        if not send_email_otp and not send_sms_otp:
+            raise ValueError("Au moins un canal OTP (email ou SMS) doit être activé")
 
         personal_key = secrets.token_urlsafe(16).upper()
         now = _iso(_utcnow())
@@ -1043,8 +1596,9 @@ class AuthService:
                 INSERT INTO users (
                     email, phone, password_hash, full_name, role, job_profile,
                     personal_access_key_hash, email_verified, phone_verified, is_active,
-                    created_at, department, employee_id, created_by_admin_id
-                ) VALUES (?, ?, ?, ?, 'user', ?, ?, 0, 0, 0, ?, ?, ?, ?)
+                    created_at, department, employee_id, created_by_admin_id, must_change_password,
+                    allowed_regions, allowed_vendors
+                ) VALUES (?, ?, ?, ?, 'responsable', ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     email_norm,
@@ -1057,11 +1611,24 @@ class AuthService:
                     department.strip(),
                     employee_id.strip(),
                     created_by,
+                    int(force_password_change),
+                    allowed_regions.strip() or "National",
+                    allowed_vendors.strip() or "nokia,huawei",
                 ),
             )
             user_id = int(conn.execute("SELECT id FROM users WHERE email = ?", (email_norm,)).fetchone()["id"])
-            email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "provision_verify")
-            phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "provision_verify")
+            email_expires: str | None = None
+            phone_expires: str | None = None
+            email_code: str | None = None
+            phone_code: str | None = None
+            email_sent = False
+            phone_sent = False
+            if send_email_otp:
+                email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "provision_verify")
+            if send_sms_otp:
+                phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "provision_verify")
+            self._require_otp_delivery(channel="email", requested=send_email_otp, sent=email_sent)
+            self._require_otp_delivery(channel="phone", requested=send_sms_otp, sent=phone_sent)
             welcome_sent = notification_service.send_account_welcome_email(
                 to=email_norm,
                 full_name=full_name.strip(),
@@ -1071,13 +1638,24 @@ class AuthService:
             self._audit(conn, created_by, "admin_user_created", f"{user_id}:{email_norm}")
 
         delivered = email_sent or phone_sent or welcome_sent
+        otp_message = ""
+        if email_sent and phone_sent:
+            otp_message = f"Codes OTP envoyés à {email_norm} et au {phone_norm}."
+        elif email_sent:
+            otp_message = f"Code OTP envoyé par email à {email_norm}."
+        elif phone_sent:
+            otp_message = f"Code OTP envoyé par SMS au {phone_norm}."
         return {
             "user_id": user_id,
             "email": email_norm,
             "phone": phone_norm,
-            "message": "Compte créé. Email et SMS envoyés avec les codes et accès."
-            if delivered
-            else "Compte créé. Vérification email et téléphone requise.",
+            "message": otp_message
+            if otp_message
+            else (
+                "Compte créé. Email et SMS envoyés avec les codes et accès."
+                if delivered
+                else "Compte créé. Vérification email et téléphone requise."
+            ),
             "temporary_password": self._expose_secret(temp_password, welcome_sent),
             "personal_access_key": self._expose_secret(personal_key, welcome_sent),
             "notifications": {
@@ -1088,9 +1666,10 @@ class AuthService:
             "verification": {
                 "email_expires_at": email_expires,
                 "phone_expires_at": phone_expires,
-                "dev_email_code": email_code,
-                "dev_phone_code": phone_code,
+                **self._dev_otp_payload(email_code=email_code, phone_code=phone_code),
+                "requires_sms": send_sms_otp,
             },
+            "must_change_password": force_password_change,
         }
 
     def verify_user_provision(
@@ -1102,11 +1681,17 @@ class AuthService:
         actor_id: int | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'user'", (user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'responsable'", (user_id,)).fetchone()
             if row is None:
                 raise ValueError("User not found")
-            self._verify_otp(conn, user_id, "email", "provision_verify", email_code)
-            self._verify_otp(conn, user_id, "phone", "provision_verify", phone_code)
+            if self._has_active_otp(conn, user_id, "email", "provision_verify") or email_code.strip():
+                self._verify_otp(conn, user_id, "email", "provision_verify", email_code)
+            else:
+                conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
+            if self._has_active_otp(conn, user_id, "phone", "provision_verify") or phone_code.strip():
+                self._verify_otp(conn, user_id, "phone", "provision_verify", phone_code)
+            else:
+                conn.execute("UPDATE users SET phone_verified = 1 WHERE id = ?", (user_id,))
             conn.execute(
                 "UPDATE users SET email_verified = 1, phone_verified = 1, is_active = 1 WHERE id = ?",
                 (user_id,),
@@ -1129,7 +1714,7 @@ class AuthService:
     ) -> dict[str, Any]:
         email_norm = _normalize_email(email)
         with self._connect() as conn:
-            row = conn.execute("SELECT id FROM users WHERE email = ? AND role = 'user'", (email_norm,)).fetchone()
+            row = conn.execute("SELECT id FROM users WHERE email = ? AND role = 'responsable'", (email_norm,)).fetchone()
             if row is None:
                 raise ValueError("User not found")
             user_id = int(row["id"])
@@ -1138,25 +1723,54 @@ class AuthService:
     def resend_provision_otp(self, *, user_id: int, actor_id: int) -> dict[str, Any]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, is_active, email_verified, phone_verified FROM users WHERE id = ? AND role = 'user'",
+                "SELECT id, is_active, email_verified, phone_verified FROM users WHERE id = ? AND role = 'responsable'",
                 (user_id,),
             ).fetchone()
             if row is None:
                 raise ValueError("User not found")
             if bool(row["is_active"]) and bool(row["email_verified"]) and bool(row["phone_verified"]):
                 raise ValueError("User already verified")
-            email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "provision_verify")
-            phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "provision_verify")
+            needs_email = not bool(row["email_verified"])
+            has_phone_provision = (
+                conn.execute(
+                    """
+                    SELECT 1 FROM otp_codes
+                    WHERE user_id = ? AND channel = 'phone' AND purpose = 'provision_verify'
+                    LIMIT 1
+                    """,
+                    (user_id,),
+                ).fetchone()
+                is not None
+            )
+            needs_phone = not bool(row["phone_verified"]) and has_phone_provision
+            email_expires: str | None = None
+            phone_expires: str | None = None
+            email_code: str | None = None
+            phone_code: str | None = None
+            email_sent = not needs_email
+            phone_sent = not needs_phone
+            if needs_email:
+                email_expires, email_code, email_sent = self._issue_otp(conn, user_id, "email", "provision_verify")
+            if needs_phone:
+                phone_expires, phone_code, phone_sent = self._issue_otp(conn, user_id, "phone", "provision_verify")
+            self._require_otp_delivery(channel="email", requested=needs_email, sent=email_sent)
+            self._require_otp_delivery(channel="phone", requested=needs_phone, sent=phone_sent)
             self._audit(conn, actor_id, "provision_otp_resent", str(user_id))
+        otp_message = ""
+        if email_sent and phone_sent:
+            otp_message = "Nouveaux codes OTP envoyés par email et SMS."
+        elif email_sent:
+            otp_message = "Nouveau code OTP envoyé par email."
+        elif phone_sent:
+            otp_message = "Nouveau code OTP envoyé par SMS."
         return {
             "user_id": user_id,
-            "message": "Nouveaux codes envoyés par email et SMS." if (email_sent or phone_sent) else "",
+            "message": otp_message,
             "notifications": {"email_otp": email_sent, "sms_otp": phone_sent},
             "verification": {
                 "email_expires_at": email_expires,
                 "phone_expires_at": phone_expires,
-                "dev_email_code": email_code,
-                "dev_phone_code": phone_code,
+                **self._dev_otp_payload(email_code=email_code, phone_code=phone_code),
             },
         }
 
@@ -1166,7 +1780,10 @@ class AuthService:
                 """
                 SELECT
                     id, email, phone, full_name, role, job_profile, department, employee_id,
-                    email_verified, phone_verified, is_active, created_at, last_login_at, created_by_admin_id
+                    email_verified, phone_verified, is_active, created_at, last_login_at,
+                    created_by_admin_id, failed_login_attempts, login_security_required,
+                    must_change_password, last_failed_login_at, allowed_regions, allowed_vendors,
+                    last_login_ip, last_login_user_agent, signup_status
                 FROM users ORDER BY role DESC, full_name
                 """
             ).fetchall()
@@ -1190,7 +1807,7 @@ class AuthService:
 
     def set_user_active(self, *, user_id: int, is_active: bool, actor_id: int) -> dict[str, Any]:
         with self._connect() as conn:
-            conn.execute("UPDATE users SET is_active = ? WHERE id = ? AND role = 'user'", (int(is_active), user_id))
+            conn.execute("UPDATE users SET is_active = ? WHERE id = ? AND role = 'responsable'", (int(is_active), user_id))
             self._audit(conn, actor_id, "user_status_changed", f"{user_id}:{is_active}")
         user = self.get_user_by_id(user_id)
         if not user:
@@ -1274,12 +1891,27 @@ class AuthService:
         )
         return int(row["user_id"])
 
-    def register_user(self, *, email: str, password: str, full_name: str) -> dict[str, Any]:
+    def register_user(
+        self,
+        *,
+        email: str,
+        password: str,
+        full_name: str,
+        phone: str,
+        job_profile: str,
+        department: str = "",
+        employee_id: str = "",
+    ) -> dict[str, Any]:
         email_norm = self._validate_email_format(email)
         self._validate_password_strength(password)
         name = full_name.strip()
         if len(name) < 2:
             raise ValueError("Full name is required")
+        phone_norm = _normalize_phone(phone)
+        if len(phone_norm) < 8:
+            raise ValueError("Phone number is required (international format +216...)")
+        if job_profile not in USER_JOB_PROFILES:
+            raise ValueError("Invalid job profile")
 
         with self._connect() as conn:
             existing = conn.execute("SELECT id FROM users WHERE email = ?", (email_norm,)).fetchone()
@@ -1290,45 +1922,126 @@ class AuthService:
                 """
                 INSERT INTO users (
                     email, phone, password_hash, full_name, role, job_profile,
-                    personal_access_key_hash, email_verified, phone_verified, is_active, created_at
-                ) VALUES (?, ?, ?, ?, 'user', 'data_analyst_bi', NULL, 0, 0, 0, ?)
+                    personal_access_key_hash, email_verified, phone_verified, is_active,
+                    created_at, department, employee_id, signup_status
+                ) VALUES (?, ?, ?, ?, 'responsable', ?, NULL, 0, 0, 0, ?, ?, ?, 'pending_admin')
                 """,
-                (email_norm, "", pwd_context.hash(password), name, now),
+                (
+                    email_norm,
+                    phone_norm,
+                    pwd_context.hash(password),
+                    name,
+                    job_profile,
+                    now,
+                    department.strip(),
+                    employee_id.strip(),
+                ),
             )
             user_id = int(conn.execute("SELECT id FROM users WHERE email = ?", (email_norm,)).fetchone()["id"])
-            verify_token = self._issue_secure_token(conn, user_id, "email_verify", hours=EMAIL_VERIFY_HOURS)
-            self._audit(conn, user_id, "register", "Classic registration started")
+            self._audit(conn, user_id, "signup_access_requested", department.strip() or job_profile)
 
-        verify_url = f"{FRONTEND_URL}/verify-email?token={verify_token}"
-        result: dict[str, Any] = {
+        admin_email = os.getenv("ADMIN_EMAIL", "").strip()
+        if admin_email:
+            notification_service.send_signup_access_request_admin(
+                to=admin_email,
+                full_name=name,
+                user_email=email_norm,
+                phone=phone_norm,
+                job_profile=job_profile,
+                department=department.strip(),
+            )
+
+        n8n_service.trigger_signup_access_sync(
+            {
+                "event": "access_requested",
+                "user_id": user_id,
+                "email": email_norm,
+                "full_name": name,
+                "phone": phone_norm,
+                "job_profile": job_profile,
+                "department": department.strip(),
+                "employee_id": employee_id.strip(),
+                "admin_email": admin_email,
+                "admin_panel_url": f"{FRONTEND_URL}/admin/users",
+            }
+        )
+
+        return {
             "user_id": user_id,
             "email": email_norm,
-            "message": "Registration successful. Check your email to verify your account.",
-            "email_sent": False,
-            "verify_url": None,
-            "dev_verify_token": None,
+            "message": "Access request submitted. An administrator will review your request. You will receive a confirmation email once approved.",
+            "pending_admin_approval": True,
         }
-        if feature_flags.background_email:
-            result["_email_job"] = {
-                "user_id": user_id,
-                "email_norm": email_norm,
-                "full_name": name,
-                "verify_url": verify_url,
-                "verify_token": verify_token,
-            }
-            return result
-        email_sent = self.deliver_registration_email(
-            user_id=user_id,
-            email_norm=email_norm,
-            full_name=name,
-            verify_url=verify_url,
-            verify_token=verify_token,
+
+    def approve_signup_access(self, *, user_id: int, actor_id: int) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'responsable'", (user_id,)).fetchone()
+            if row is None:
+                raise ValueError("User not found")
+            if str(row.get("signup_status") or "") != "pending_admin":
+                raise ValueError("No pending access request for this user")
+            conn.execute(
+                """
+                UPDATE users
+                SET is_active = 1, email_verified = 1, phone_verified = 1, signup_status = 'approved'
+                WHERE id = ?
+                """,
+                (user_id,),
+            )
+            self._audit(conn, actor_id, "signup_access_approved", str(user_id))
+
+        user = self.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
+        login_url = f"{FRONTEND_URL}/login"
+        email_sent = notification_service.send_signup_access_approved(
+            to=user.email,
+            full_name=user.full_name,
+            login_url=login_url,
+            user_id=user.id,
         )
-        result["email_sent"] = email_sent
-        if AUTH_DEV_MODE and not email_sent:
-            result["verify_url"] = verify_url
-            result["dev_verify_token"] = verify_token
-        return result
+        n8n_service.trigger_signup_access_sync(
+            {
+                "event": "access_approved",
+                "user_id": user_id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "login_url": login_url,
+                "email_sent": email_sent,
+            }
+        )
+        return {
+            "user_id": user_id,
+            "message": "Access approved. Confirmation email sent to the user.",
+            "email_sent": email_sent,
+            "user": self.serialize_user(user),
+        }
+
+    def reject_signup_access(self, *, user_id: int, actor_id: int) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'responsable'", (user_id,)).fetchone()
+            if row is None:
+                raise ValueError("User not found")
+            if str(row.get("signup_status") or "") != "pending_admin":
+                raise ValueError("No pending access request for this user")
+            email = str(row["email"])
+            full_name = str(row["full_name"])
+            conn.execute(
+                "UPDATE users SET signup_status = 'rejected', is_active = 0 WHERE id = ?",
+                (user_id,),
+            )
+            self._audit(conn, actor_id, "signup_access_rejected", str(user_id))
+
+        notification_service.send_signup_access_rejected(to=email, full_name=full_name, user_id=user_id)
+        n8n_service.trigger_signup_access_sync(
+            {
+                "event": "access_rejected",
+                "user_id": user_id,
+                "email": email,
+                "full_name": full_name,
+            }
+        )
+        return {"user_id": user_id, "message": "Access request rejected."}
 
     def deliver_registration_email(
         self,
@@ -1347,19 +2060,39 @@ class AuthService:
             user_id=user_id,
         )
 
-    def login_user(self, *, email: str, password: str) -> dict[str, Any]:
+    def login_user(
+        self,
+        *,
+        email: str,
+        password: str,
+        login_ip: str | None = None,
+        login_user_agent: str | None = None,
+    ) -> dict[str, Any]:
         email_norm = self._validate_email_format(email)
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM users WHERE email = ?", (email_norm,)).fetchone()
-            if row is None or not pwd_context.verify(password, str(row["password_hash"])):
-                raise ValueError("Invalid email or password")
+            row = self._authenticate_password(conn, row, password, invalid_message="Invalid email or password")
+            signup_status = str(row.get("signup_status") or "")
+            if signup_status == "pending_admin":
+                raise ValueError("Access request pending administrator approval.")
+            if signup_status == "rejected":
+                raise ValueError("Access request was rejected. Contact an administrator.")
             if not bool(row["email_verified"]):
                 raise ValueError("Email not verified. Check your inbox for the verification link.")
             if not bool(row["is_active"]):
                 raise ValueError("Account is inactive. Contact an administrator.")
+            user_id = int(row["id"])
+            self._clear_login_failures(conn, user_id)
             user = self._row_to_user(row)
-            self._audit(conn, user.id, "login_user")
-        return self._issue_tokens(user)
+            self._audit(conn, user_id, "login_user")
+        payload = self._issue_tokens(
+            user,
+            login_ip=login_ip,
+            login_user_agent=login_user_agent,
+        )
+        if self._must_change_password(row):
+            payload["must_change_password"] = True
+        return payload
 
     def verify_email(self, *, token: str) -> dict[str, Any]:
         with self._connect() as conn:

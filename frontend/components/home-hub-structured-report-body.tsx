@@ -176,10 +176,10 @@ export function HomeHubStructuredReportBody({
               height={220}
               framed={false}
               bars={[
-                { key: "cells_2g", color: "#94a3b8" },
-                { key: "cells_3g", color: "#f59e0b" },
+                { key: "cells_2g", color: TECH_COLORS.cells_2g },
+                { key: "cells_3g", color: TECH_COLORS.cells_3g },
                 { key: "cells_4g", color: TECH_COLORS.cells_4g },
-                { key: "cells_5g", color: "#7c3aed" },
+                { key: "cells_5g", color: TECH_COLORS.cells_5g },
               ]}
             />
           </InvestigationSection>

@@ -1,0 +1,21 @@
+services:
+  n8n:
+    image: n8nio/n8n:1.76.1
+    container_name: ran-n8n
+    restart: unless-stopped
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: Africa/Tunis
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-n8n}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-n8n_dev_change_me}
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - ran_n8n_data:/home/node/.n8n
+
+volumes:
+  ran_n8n_data:

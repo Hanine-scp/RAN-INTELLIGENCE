@@ -10,7 +10,7 @@ import { PageLoadingSkeleton } from "@/components/skeleton";
 import { useAppContext } from "@/components/app-provider";
 import { getSiteKpiTimeseries, getSitesV2, investigateSite, type SiteKpiTimeseries } from "@/lib/api";
 import { t } from "@/lib/i18n";
-import { UNLIMITED_PAGE_QUERY } from "@/lib/pagination";
+import { DEFAULT_TABLE_PAGE_SIZE } from "@/lib/pagination";
 import { buildSiteCellRow } from "@/lib/site-cell-metrics";
 import type { FilterPayload } from "@/lib/types";
 
@@ -24,6 +24,7 @@ export function SitesTableSection({ payload, language }: SitesTableSectionProps)
   const fr = language === "Français";
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
@@ -33,6 +34,24 @@ export function SitesTableSection({ payload, language }: SitesTableSectionProps)
   const [investigationError, setInvestigationError] = useState("");
   const [kpiData, setKpiData] = useState<SiteKpiTimeseries | null>(null);
   const [kpiLoading, setKpiLoading] = useState(false);
+
+  const payloadKey = useMemo(
+    () =>
+      [
+        payload.vendor,
+        ...(payload.effective_dates ?? []).sort(),
+        ...(payload.selected_dates ?? []).sort(),
+        ...(payload.selected_files ?? []).sort(),
+        ...(payload.selected_sites ?? []).sort(),
+      ].join(":"),
+    [payload],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [payloadKey]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / DEFAULT_TABLE_PAGE_SIZE));
 
   useEffect(() => {
     const load = async () => {
@@ -47,7 +66,11 @@ export function SitesTableSection({ payload, language }: SitesTableSectionProps)
       setLoading(true);
       setLoadError("");
       try {
-        const data = await getSitesV2(payload, { ...UNLIMITED_PAGE_QUERY });
+        const data = await getSitesV2(payload, {
+          page,
+          page_size: DEFAULT_TABLE_PAGE_SIZE,
+          search: payload.site_search ?? "",
+        });
         setRows(data.rows);
         setTotalCount(Number(data.total_count ?? data.rows.length));
         setSelectedSiteId((current) =>
@@ -62,7 +85,7 @@ export function SitesTableSection({ payload, language }: SitesTableSectionProps)
       }
     };
     void load();
-  }, [payload]);
+  }, [payload, payloadKey, page]);
 
   useEffect(() => {
     const loadInvestigation = async () => {
@@ -273,8 +296,8 @@ export function SitesTableSection({ payload, language }: SitesTableSectionProps)
             </p>
             <p className="text-xs text-slate-500">
               {fr
-                ? `${cellTableRows.length.toLocaleString()} ligne(s) · données complètes sans limite`
-                : `${cellTableRows.length.toLocaleString()} row(s) · full data, no limit`}
+                ? `${cellTableRows.length.toLocaleString()} ligne(s) sur ${totalCount.toLocaleString()} · page ${page}/${totalPages}`
+                : `${cellTableRows.length.toLocaleString()} row(s) of ${totalCount.toLocaleString()} · page ${page}/${totalPages}`}
             </p>
             <DataTable
               rows={cellTableRows}
@@ -304,6 +327,32 @@ export function SitesTableSection({ payload, language }: SitesTableSectionProps)
               }}
             />
           </div>
+
+          {totalCount > DEFAULT_TABLE_PAGE_SIZE ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+              <span className="text-slate-600">
+                {fr ? `Page ${page} / ${totalPages}` : `Page ${page} of ${totalPages}`}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  {fr ? "Précédent" : "Previous"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                >
+                  {fr ? "Suivant" : "Next"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
 

@@ -1,0 +1,95 @@
+{
+  "realm": "ran-intelligence",
+  "enabled": true,
+  "displayName": "RAN Intelligence",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "roles": {
+    "realm": [
+      { "name": "ran-admin", "description": "Platform administrator" },
+      { "name": "ran-engineer", "description": "RAN engineer" },
+      { "name": "ran-analyst", "description": "Data analyst / BI" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ran-frontend",
+      "name": "RAN Intelligence Frontend",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "allowed_vendors",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "allowed_vendors",
+            "claim.name": "allowed_vendors",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "ran-api",
+      "name": "RAN Intelligence API",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "ran-api-dev-secret-change-in-prod",
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "admin.ran",
+      "enabled": true,
+      "email": "admin.ran@ooredoo.tn",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "RAN",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Admin@RAN2026!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ran-admin"]
+    },
+    {
+      "username": "engineer.ran",
+      "enabled": true,
+      "email": "engineer.ran@ooredoo.tn",
+      "emailVerified": true,
+      "firstName": "Engineer",
+      "lastName": "RAN",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Engineer@RAN2026!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ran-engineer"]
+    }
+  ]
+}

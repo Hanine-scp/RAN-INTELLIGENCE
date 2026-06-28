@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PremiumHubTabs, type PremiumHubTabItem } from "@/components/premium-hub-tabs";
+import { HubPageReportSection } from "@/components/hub-page-report-section";
 import { ClusteringSection } from "@/components/clustering-section";
 import { PatternsSection } from "@/components/patterns-section";
 import { useAuth } from "@/components/auth-provider";
@@ -80,6 +81,7 @@ function SignalsPageLayoutInner() {
         activeTab={activeTab}
         onTabChange={selectTab}
       />
+      <HubPageReportSection hub="signals" activeTab={activeTab} />
       <section aria-label="Signals content">
         {activeTab === "clustering" && showClusteringTab ? <ClusteringSection /> : <PatternsSection />}
       </section>

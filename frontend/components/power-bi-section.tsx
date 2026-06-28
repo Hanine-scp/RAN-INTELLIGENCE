@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PlatformPeriodBanner } from "@/components/platform-period-banner";
 import { SortableTableHeader } from "@/components/sortable-table-header";
 import { useAppContext } from "@/components/app-provider";
 import { useAuth } from "@/components/auth-provider";
@@ -92,11 +93,11 @@ export function PowerBiSection() {
       },
       {
         n: 2,
-        title: fr ? "Créer le rapport Power BI Desktop" : "Build Power BI Desktop report",
+        title: fr ? "Créer le rapport Power BI" : "Build Power BI report",
         done: hasDashboard,
         body: fr
-          ? "Importer site_status.csv, snapshot_summary.csv, delta_metrics.csv depuis le dossier export."
-          : "Import site_status.csv, snapshot_summary.csv, delta_metrics.csv from the export folder.",
+          ? "Dans Power BI Desktop, créez votre rapport avec les CSV platform_delta_comparison.csv et platform_snapshot_dates.csv (sync plateforme)."
+          : "In Power BI Desktop, build your report using platform_delta_comparison.csv and platform_snapshot_dates.csv (platform sync).",
       },
       {
         n: 3,
@@ -123,9 +124,8 @@ export function PowerBiSection() {
     }
   };
 
-  return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-      <div className="space-y-5">
+  const adminPanel = (
+    <div className="space-y-5">
         <section className="premium-card rounded-2xl p-5">
           <h3 className="text-sm font-bold text-slate-900">{fr ? "Étapes d'intégration" : "Integration steps"}</h3>
           <ol className="mt-4 space-y-4">
@@ -238,56 +238,84 @@ NEXT_PUBLIC_POWER_BI_REPORT_URL=https://app.powerbi.com/groups/.../reports/...`}
             </pre>
           </section>
         ) : null}
+    </div>
+  );
+
+  const dashboardPanel = (
+    <section className="premium-card flex min-h-0 flex-1 flex-col rounded-2xl p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-slate-900">Power BI</h3>
+        {reportUrl ? (
+          <a
+            href={reportUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-xl border border-teal-500 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-50"
+          >
+            {fr ? "Ouvrir dans Power BI" : "Open in Power BI"}
+          </a>
+        ) : null}
       </div>
 
-      <section className="premium-card flex min-h-[520px] flex-col rounded-2xl p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-slate-900">{fr ? "Dashboard Power BI" : "Power BI dashboard"}</h3>
+      {embedUrl ? (
+        <iframe
+          title={fr ? "Power BI — RAN Intelligence" : "Power BI — RAN Intelligence"}
+          src={embedUrl}
+          className="min-h-[calc(100vh-280px)] w-full flex-1 rounded-xl border border-slate-200 bg-white"
+          allowFullScreen
+        />
+      ) : (
+        <div className="flex min-h-[420px] flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-6 text-center">
+          <div className="mb-3 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-yellow-400/20 text-2xl font-black text-yellow-700">
+            PBI
+          </div>
+          <p className="text-sm font-semibold text-slate-700">
+            {fr ? "Aucun dashboard embarqué pour le moment" : "No embedded dashboard yet"}
+          </p>
+          <p className="mt-2 max-w-md text-xs leading-relaxed text-slate-500">
+            {fr
+              ? "Une fois votre rapport publié, ajoutez l'URL dans .env.local et redémarrez le frontend. Le dashboard s'affichera ici."
+              : "Once your report is published, add the URL to .env.local and restart the frontend. The dashboard will appear here."}
+          </p>
           {reportUrl ? (
             <a
               href={reportUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-xl border border-teal-500 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-50"
+              className="mt-4 rounded-xl border border-teal-500 bg-teal-600 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-700"
             >
-              {fr ? "Ouvrir dans Power BI" : "Open in Power BI"}
+              {fr ? "Voir le rapport externe" : "View external report"}
             </a>
           ) : null}
         </div>
+      )}
+    </section>
+  );
 
-        {embedUrl ? (
-          <iframe
-            title={fr ? "Dashboard Power BI RAN Intelligence" : "RAN Intelligence Power BI dashboard"}
-            src={embedUrl}
-            className="min-h-[480px] w-full flex-1 rounded-xl border border-slate-200 bg-white"
-            allowFullScreen
-          />
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-6 text-center">
-            <div className="mb-3 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-yellow-400/20 text-2xl font-black text-yellow-700">
-              PBI
-            </div>
-            <p className="text-sm font-semibold text-slate-700">
-              {fr ? "Aucun dashboard embarqué pour le moment" : "No embedded dashboard yet"}
-            </p>
-            <p className="mt-2 max-w-md text-xs leading-relaxed text-slate-500">
-              {fr
-                ? "Une fois votre rapport publié, ajoutez l'URL dans .env.local et redémarrez le frontend. Le dashboard s'affichera ici."
-                : "Once your report is published, add the URL to .env.local and restart the frontend. The dashboard will appear here."}
-            </p>
-            {reportUrl ? (
-              <a
-                href={reportUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 rounded-xl border border-teal-500 bg-teal-600 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-700"
-              >
-                {fr ? "Voir le rapport externe" : "View external report"}
-              </a>
-            ) : null}
-          </div>
-        )}
-      </section>
+  if (hasDashboard) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <PlatformPeriodBanner />
+        {dashboardPanel}
+        {admin ? (
+          <details className="premium-card rounded-2xl p-4">
+            <summary className="cursor-pointer text-sm font-bold text-slate-900">
+              {fr ? "Administration & export CSV" : "Administration & CSV export"}
+            </summary>
+            <div className="mt-4">{adminPanel}</div>
+          </details>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <PlatformPeriodBanner />
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        {adminPanel}
+        {dashboardPanel}
+      </div>
     </div>
   );
 }

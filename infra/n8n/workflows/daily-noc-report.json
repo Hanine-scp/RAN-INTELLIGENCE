@@ -1,0 +1,83 @@
+{
+  "name": "RAN — Rapport NOC quotidien",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 6 * * *" }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Tous les jours 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8010/guardian/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{$env.RAN_API_TOKEN}}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"selected_dates\": [],\n  \"vendor\": \"nokia\"\n}",
+        "options": {}
+      },
+      "id": "run-guardian",
+      "name": "Lancer moteurs Guardian",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8010/guardian/overview",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{$env.RAN_API_TOKEN}}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"selected_dates\": [],\n  \"vendor\": \"nokia\"\n}",
+        "options": {}
+      },
+      "id": "fetch-overview",
+      "name": "Récupérer synthèse NOC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "content": "=Rapport NOC du {{$now.format('yyyy-LL-dd')}}\n\nAnomalies: {{$json[\"data\"][\"anomaly_count\"]}}\nRisques: {{$json[\"data\"][\"risk_count\"]}}\nSnapshot: {{$json[\"data\"][\"latest_snapshot\"]}}\n\nConfigurez ici un nœud Email / Microsoft Teams / Slack pour diffuser le rapport.",
+        "height": 220,
+        "width": 360
+      },
+      "id": "notify-placeholder",
+      "name": "→ Brancher Email/Teams ici",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1080, 220]
+    }
+  ],
+  "connections": {
+    "Tous les jours 06:00": {
+      "main": [[{ "node": "Lancer moteurs Guardian", "type": "main", "index": 0 }]]
+    },
+    "Lancer moteurs Guardian": {
+      "main": [[{ "node": "Récupérer synthèse NOC", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "active": false
+}

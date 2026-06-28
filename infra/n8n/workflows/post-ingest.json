@@ -1,0 +1,139 @@
+{
+  "name": "RAN · Post-Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ran/post-ingest",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-post-ingest",
+      "name": "Webhook post-ingest",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "ran-post-ingest"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "v1",
+              "name": "vendor",
+              "value": "={{ $json.body?.vendor ?? $json.vendor ?? 'nokia' }}",
+              "type": "string"
+            },
+            {
+              "id": "v2",
+              "name": "snapshot_date",
+              "value": "={{ $json.body?.snapshot_date ?? $json.snapshot_date ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "v3",
+              "name": "snapshot_dates",
+              "value": "={{ ($json.body?.snapshot_date ?? $json.snapshot_date) ? [($json.body?.snapshot_date ?? $json.snapshot_date)] : [] }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalize",
+      "name": "Normaliser payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAN_BACKEND_URL || 'http://host.docker.internal:8010' }}/guardian/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.RAN_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ snapshot_dates: $json.snapshot_dates }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "guardian-run",
+      "name": "Guardian run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RAN_BACKEND_URL || 'http://host.docker.internal:8010' }}/integrations/powerbi/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.RAN_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "powerbi-sync",
+      "name": "Power BI sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1020, 300]
+    },
+    {
+      "parameters": {
+        "content": "## RAN · Post-Ingestion\n\n**Webhook** : `POST /webhook/ran/post-ingest`\n\n**Variables n8n** (Settings → Variables ou `.env.identity`) :\n- `RAN_API_TOKEN` — JWT admin **après reset DB**\n- `RAN_BACKEND_URL` — `http://host.docker.internal:8010`\n\n**Corps attendu** (optionnel) :\n```json\n{ \"vendor\": \"nokia\", \"snapshot_date\": \"2026-06-26\" }\n```\n\n⚠️ Ne pas utiliser `localhost:8010` dans les nœuds HTTP — n8n tourne dans Docker.",
+        "height": 300,
+        "width": 400
+      },
+      "id": "note",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, 40]
+    }
+  ],
+  "connections": {
+    "Webhook post-ingest": {
+      "main": [[{ "node": "Normaliser payload", "type": "main", "index": 0 }]]
+    },
+    "Normaliser payload": {
+      "main": [[{ "node": "Guardian run", "type": "main", "index": 0 }]]
+    },
+    "Guardian run": {
+      "main": [[{ "node": "Power BI sync", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

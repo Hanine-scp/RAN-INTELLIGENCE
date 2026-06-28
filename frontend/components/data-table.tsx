@@ -35,11 +35,11 @@ function columnCellClass(column: string, compact: boolean) {
 
 function columnHeaderClass(column: string, compact: boolean) {
   const numeric = isNumericColumn(column);
-  const padding = compact ? "px-3 py-2.5" : "px-2 py-2";
+  const padding = compact ? "px-3 py-2.5" : "px-3 py-2.5";
   if (numeric) {
-    return `${padding} border-b border-red-100 text-[11px] font-semibold tracking-wide text-slate-600 ${compact ? "w-[34%]" : ""}`;
+    return `${padding} text-right ${compact ? "w-[34%]" : ""}`;
   }
-  return `${padding} border-b border-red-100 text-[11px] font-semibold tracking-wide text-slate-600 ${compact ? "w-[66%] min-w-0" : ""}`;
+  return `${padding} text-left ${compact ? "w-[66%] min-w-0" : ""}`;
 }
 
 type DataTableProps = {
@@ -193,25 +193,26 @@ export function DataTable({
     return displayText;
   };
 
-  const rowClassName = (row: Record<string, unknown>) => {
+  const rowClassName = (row: Record<string, unknown>, idx: number) => {
+    const zebra = idx % 2 === 0 ? "platform-table-row-even" : "platform-table-row-odd";
     const signalTone = String(row._signal_tone ?? "");
     if (signalTone === "critical") {
-      return "border-b border-red-100 bg-red-50/20 hover:bg-red-50/40";
+      return `${zebra} platform-table-row border-b border-red-100 bg-red-50/40 hover:bg-red-50/60`;
     }
     if (signalTone === "warning") {
-      return "border-b border-amber-100 bg-amber-50/15 hover:bg-amber-50/30";
+      return `${zebra} platform-table-row border-b border-amber-100 bg-amber-50/30 hover:bg-amber-50/50`;
     }
     if (signalTone === "success") {
-      return "border-b border-emerald-100 bg-emerald-50/15 hover:bg-emerald-50/30";
+      return `${zebra} platform-table-row border-b border-emerald-100 bg-emerald-50/20 hover:bg-emerald-50/40`;
     }
     const interpretation = String(row.interpretation ?? "").toLowerCase();
     if (interpretation === "degradation") {
-      return "border-b border-red-100 bg-red-50/20 hover:bg-red-50/40";
+      return `${zebra} platform-table-row border-b border-red-100 hover:bg-red-50/30`;
     }
     if (interpretation === "improvement") {
-      return "border-b border-emerald-100 bg-emerald-50/20 hover:bg-emerald-50/40";
+      return `${zebra} platform-table-row border-b border-emerald-100 hover:bg-emerald-50/30`;
     }
-    return "border-b border-red-50 bg-white hover:bg-red-50/40";
+    return `${zebra} platform-table-row border-b border-[#E2E8F0] hover:bg-[#F1F5F9]`;
   };
 
   const canSort = enableSorting && (sortableLargeDataset || filteredRows.length <= 3000);
@@ -267,7 +268,7 @@ export function DataTable({
   const renderDataRow = (row: Record<string, unknown>, idx: number) => (
     <tr
       key={`${idx}-${String(row[fallbackRowKey] ?? idx)}`}
-      className={`${rowClassName(row)} ${onRowClick ? "cursor-pointer" : ""}`}
+      className={`${rowClassName(row, idx)} ${onRowClick ? "cursor-pointer" : ""}`}
       onClick={() => onRowClick?.(row)}
     >
       {effectiveRowSelection ? (
@@ -372,7 +373,7 @@ export function DataTable({
               value={siteQuery}
               onChange={(event) => setSiteQuery(event.target.value)}
               placeholder={t(filters.language, "table_search")}
-              className="h-8 min-w-0 flex-1 rounded-xl border border-red-100 bg-white px-2.5 text-xs text-slate-700 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+              className="h-8 min-w-0 flex-1 rounded-md border border-[#E2E8F0] bg-white px-2.5 text-xs text-slate-700 outline-none transition focus:border-[#0F766E] focus:ring-2 focus:ring-[#0F766E]/15"
             />
           </div>
         </div>
@@ -381,15 +382,15 @@ export function DataTable({
         <table
           className={`w-full text-left text-xs ${compact ? "min-w-0 table-fixed" : "min-w-[920px] table-auto"}`}
         >
-          <thead className="sticky top-0 bg-teal-50/80 backdrop-blur">
+          <thead className="platform-table-head sticky top-0 z-10">
             <tr>
               {effectiveRowSelection ? (
-                <th className="whitespace-nowrap border-b border-red-100 px-2 py-2 text-[11px] font-semibold tracking-wide text-slate-600">
+                <th className="whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold">
                   {selectionHeaderLabel}
                 </th>
               ) : null}
               {showIndex && !mergedSelectionIndex ? (
-                <th className="whitespace-nowrap border-b border-red-100 px-2.5 py-2 text-[11px] font-semibold tracking-wide text-slate-600">
+                <th className="whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold">
                   {indexHeaderLabel}
                 </th>
               ) : null}
@@ -401,6 +402,7 @@ export function DataTable({
                     <span className={compact && !isNumericColumn(column) ? "truncate" : ""}>{labelFor(column)}</span>
                     {canSort ? (
                       <TableSortIcons
+                        inverted
                         active={sortColumn === column}
                         direction={sortDirection}
                         columnLabel={labelFor(column)}
@@ -436,7 +438,7 @@ export function DataTable({
           </tbody>
         </table>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-red-100 bg-gradient-to-r from-white to-red-50/40 px-3 py-2">
+      <div className="platform-surface-footer flex flex-wrap items-center justify-between gap-2 px-3 py-2">
         <span className="text-xs font-medium text-slate-600">
           {exportRows.length.toLocaleString()} {t(filters.language, "table_rows")}
         </span>
@@ -444,14 +446,14 @@ export function DataTable({
           <button
             type="button"
             onClick={exportCsv}
-            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50"
+            className="rounded-md border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs font-semibold text-[#1E293B] transition hover:bg-[#F8FAFC]"
           >
             {t(filters.language, "export_csv")}
           </button>
           <button
             type="button"
             onClick={exportExcel}
-            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50"
+            className="rounded-md border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs font-semibold text-[#1E293B] transition hover:bg-[#F8FAFC]"
           >
             {t(filters.language, "export_excel")}
           </button>

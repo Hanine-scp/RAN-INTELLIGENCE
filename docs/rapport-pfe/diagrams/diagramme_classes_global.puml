@@ -1,0 +1,395 @@
+@startuml diagramme_classes_global
+' ============================================================
+'  RAN INTELLIGENCE — Diagramme de classes global
+'  Restructure et fidele au code (src/services, api, modeles)
+' ============================================================
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype ortho
+skinparam nodesep 35
+skinparam ranksep 55
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 12
+skinparam packageStyle rectangle
+skinparam class {
+  BackgroundColor White
+  BorderColor #2B3A55
+  ArrowColor #2B3A55
+  AttributeFontSize 11
+}
+skinparam stereotypeCBackgroundColor #EEF3FB
+
+' --- Stereotypes / couleurs par couche ---------------------
+skinparam package {
+  BorderColor #94A3B8
+  FontStyle bold
+}
+
+' ============================================================
+'  1. COUCHE API & SECURITE D'ACCES (FastAPI)
+' ============================================================
+package "1. API & Securite d'acces (FastAPI)" #F4F7FE {
+  class FastAPIApp <<application>> {
+    +title = "RAN Guardian Copilot API"
+    +version = "2.0.0"
+    --
+    +include_router(auth_router)
+    +include_router(integration_router)
+    -_ctx(payload, user) : FilterContext
+  }
+  class AccessControlMiddleware <<middleware>> {
+    +dispatch(request, call_next)
+  }
+  class RouteRule <<dataclass>> {
+    +permission : str?
+    +admin_only : bool
+  }
+  class ApiDependencies <<module>> {
+    +get_current_user() : AuthUser
+    +require_admin() : AuthUser
+    +require_permission(perm)
+  }
+  class FilterPayload <<schema>> {
+    +selected_dates : list
+    +selected_sites : list
+    +vendor : str
+    +language : str
+  }
+  class ApiEnvelope <<schema>> {
+    +data : Any
+  }
+}
+
+' ============================================================
+'  2. ACTEURS & RBAC
+' ============================================================
+package "2. Acteurs & RBAC" #FEF6F4 {
+  class AuthUser <<dataclass>> {
+    +id : int
+    +email : str
+    +phone : str
+    +full_name : str
+    +role : str
+    +job_profile : str
+    +permissions : list
+    +allowed_vendors : list?
+    +allowed_regions : list?
+    +is_active : bool
+  }
+  enum Role {
+    admin
+    responsable
+  }
+  class AccessControl <<module>> {
+    +permissions_for(role, profile) : list
+    +clamp_vendor(user, vendor)
+    +match_route_rule(path, method) : RouteRule
+    +user_scope_from_row(row)
+    --
+    {static} JOB_PROFILE_PERMISSIONS
+    {static} USER_BASE_PERMISSIONS
+    {static} ADMIN_EXTRA_PERMISSIONS
+  }
+}
+
+' ============================================================
+'  3. AUTHENTIFICATION & SECURITE
+' ============================================================
+package "3. Authentification & Securite" #FFF9EC {
+  class AuthService <<service>> {
+    +login_user_step1() / step2()
+    +login_admin_step1() / step2()
+    +verify signup / register_user()
+    +refresh_session() / logout()
+    +get_user_from_access_token() : AuthUser
+    +enforce_vendor_scope(user, vendor)
+    +admin_create_user() / list_users()
+    +security_center_summary()
+  }
+  class AuthDatabase <<persistance>> {
+    +auth_db_connect()
+    +init_auth_schema()
+    +check_database_connection()
+    --
+    users, refresh_tokens,
+    otp_codes, access_keys,
+    auth_audit, secure_tokens
+  }
+  class NotificationService <<service>> {
+    +deliver_otp(channel, ...)
+    +send_otp_email() / send_otp_sms()
+    +start/check_twilio_verify()
+    +start/check_vonage_verify()
+    +status()
+  }
+}
+
+' ============================================================
+'  4. ETL & DONNEES
+' ============================================================
+package "4. ETL & Donnees" #F1FBF4 {
+  class VendorLake <<module>> {
+    +resolve_lake_paths(vendor) : LakePaths
+    +discover_xml_snapshots()
+    +set_active_vendor(vendor)
+    +vendor_status()
+  }
+  class LakePaths <<dataclass>> {
+    +vendor : str
+    +root : Path
+    +sites / equipment / counters
+    +snapshot_dates : list
+    +has_sites_data : bool
+  }
+  class DataService <<service>> {
+    +get_filter_options(ctx)
+    +get_dashboard(ctx)
+    +get_sites_page_v2(ctx, page, ...)
+    +get_inventory_page_v2(ctx, ...)
+    +get_delta_comparison(ctx, d1, d2)
+    +get_anomaly_alerts(ctx)
+    +get_spares_dimensioning(ctx)
+    +query(sql, params) : DuckDB
+  }
+  class FilterContext <<dataclass>> {
+    +selected_dates : list
+    +selected_sites : list
+    +vendor : str
+    +language : str
+    --
+    {static} from_inputs(...) : FilterContext
+  }
+  class TrustService <<service>> {
+    +anchor_snapshot(date) : SHA-256
+    +verify_snapshot(date)
+    +list_anchors()
+  }
+}
+
+' ============================================================
+'  5. GUARDIAN (DATA SCIENCE)
+' ============================================================
+package "5. Guardian (Data Science)" #F4F2FE {
+  class GuardianOrchestrator <<service>> {
+    +run_after_ingest(date, vendor, ...)
+    +get_guardian_overview(ctx)
+  }
+  class IntegrityService <<service>> {
+    +record_snapshot_audit(...)
+    +get_snapshot_health(date)
+    +assert_ai_allowed(dates, vendor)
+  }
+  class ChangeIntelligenceService <<service>> {
+    +detect_changes(d_from, d_to, ctx)
+    +compare_snapshots(a, b)
+    +get_change_events(...)
+  }
+  class AnomalyIntelligenceService <<service>> {
+    +detect_anomalies(ctx, date)
+    +get_anomalies(...)
+    .. z-score + IsolationForest ..
+  }
+  class PredictiveRiskService <<service>> {
+    +compute_risk_predictions(ctx, horizons)
+    +get_risk_predictions(...)
+    .. risque J+1 / J+3 ..
+  }
+  class RiskCardsService <<service>> {
+    +get_page(ctx)
+  }
+  class GuardianDatabase <<persistance>> {
+    +guardian_connect()
+    +init_guardian_schema()
+    --
+    snapshot_audit, change_events,
+    anomalies, risk_predictions,
+    ai_audit_log
+  }
+}
+
+' ============================================================
+'  6. COPILOT IA HYBRIDE
+' ============================================================
+package "6. Copilot IA hybride" #ECFBFB {
+  class OpenAIAgentService <<service>> {
+    +run(ctx, question, history)
+    +status()
+    +is_enabled() : bool
+  }
+  class RanAiTools <<module>> {
+    +OPENAI_TOOL_DEFINITIONS : list
+    +execute_ran_tool(ctx, name, args)
+    -_guardian_gate(ctx)
+  }
+  class LlmClient <<adapter>> {
+    +chat_completion(...)
+    +create_embedding(...)
+    +model / provider
+  }
+  class RagService <<service>> {
+    +ingest_document(...)
+    +search(query, vendor, top_k)
+    +ensure_seeded()
+  }
+  class WebSearchService <<service>> {
+    +search(query, max_results)
+    +status()
+  }
+  class AssistantIntelligenceService <<service>> {
+    +classify(question, history)
+    +compose(ctx, question, ...)
+  }
+}
+
+' ============================================================
+'  7. RESTITUTION & APPLICATIONS
+' ============================================================
+package "7. Restitution & Applications" #FBF4FA {
+  class WebApp <<frontend>> {
+    Next.js / React / TS
+  }
+  class MobileApp <<frontend>> {
+    Kotlin / XML / WebView
+  }
+  class PowerBiExportService <<service>> {
+    +sync_export()
+    +status()
+  }
+  class N8nService <<service>> {
+    +trigger_workflow(id, payload)
+    +trigger_post_ingest()
+    +trigger_signup_access_sync()
+    +list_executions()
+  }
+}
+
+' ============================================================
+'  8. ENTITES METIER & PERSISTANCE (lignes parquet / table)
+' ============================================================
+package "8. Entites metier (parquet / table)" #F6F8FA {
+  class Site <<entite>> {
+    site_id, site_name, site_state
+    sw_version, nb_cells, technologies
+    snapshot_date, source_file
+  }
+  class Equipment <<entite>> {
+    site_id, object_type, id
+    serial_number, product_code
+    nb_equipment, snapshot_date
+  }
+  class Snapshot <<entite>> {
+    snapshot_date, vendor
+    file_count, completeness_rate
+    snapshot_hash, chained_hash, status
+  }
+  class ChangeEvent <<entite>> {
+    event_id, entity_type, change_type
+    old_value, new_value, severity
+    replacement_score, evidence
+  }
+  class Anomaly <<entite>> {
+    anomaly_id, anomaly_type
+    severity, anomaly_score
+    detector_name, evidence
+  }
+  class RiskPrediction <<entite>> {
+    prediction_id, horizon_days
+    risk_score, risk_level
+    top_features, model_version
+  }
+  class RiskCard <<entite>> {
+    source, product_code, site_id
+    annual_failure_rate_pct
+    criticality, recommended_spares
+  }
+}
+
+' ============================================================
+'  RELATIONS — API & RBAC
+' ============================================================
+FastAPIApp *-- AccessControlMiddleware
+FastAPIApp ..> FilterPayload : recoit
+FastAPIApp ..> ApiEnvelope : renvoie
+FastAPIApp ..> ApiDependencies : << Depends >>
+AccessControlMiddleware ..> RouteRule : evalue
+AccessControlMiddleware ..> AccessControl
+ApiDependencies ..> AuthService
+ApiDependencies --> AuthUser : injecte
+FilterPayload ..> FilterContext : converti en
+
+' --- Acteurs / RBAC ---
+AuthUser --> Role
+AuthUser ..> AccessControl : permissions_for()
+AccessControl ..> RouteRule
+
+' --- Auth ---
+AuthService --> AuthUser : produit
+AuthService ..> AuthDatabase
+AuthService ..> AccessControl
+AuthService ..> NotificationService
+AuthService ..> N8nService : signup sync
+AuthDatabase --> Site : <<persiste users>>
+
+' --- ETL / Donnees ---
+DataService ..> VendorLake
+VendorLake --> LakePaths : produit
+DataService ..> FilterContext
+DataService --> Site : projette
+DataService --> Equipment : projette
+TrustService --> Snapshot : ancre
+
+' --- Guardian ---
+GuardianOrchestrator ..> IntegrityService
+GuardianOrchestrator ..> ChangeIntelligenceService
+GuardianOrchestrator ..> AnomalyIntelligenceService
+GuardianOrchestrator ..> PredictiveRiskService
+IntegrityService ..> TrustService
+IntegrityService ..> DataService
+IntegrityService --> Snapshot
+ChangeIntelligenceService ..> DataService
+ChangeIntelligenceService --> ChangeEvent
+AnomalyIntelligenceService ..> DataService
+AnomalyIntelligenceService --> Anomaly
+PredictiveRiskService ..> ChangeIntelligenceService
+PredictiveRiskService ..> AnomalyIntelligenceService
+PredictiveRiskService --> RiskPrediction
+RiskCardsService ..> DataService
+RiskCardsService --> RiskCard
+IntegrityService ..> GuardianDatabase
+ChangeIntelligenceService ..> GuardianDatabase
+AnomalyIntelligenceService ..> GuardianDatabase
+PredictiveRiskService ..> GuardianDatabase
+
+' --- Copilot IA ---
+OpenAIAgentService ..> LlmClient
+OpenAIAgentService ..> RanAiTools
+OpenAIAgentService ..> AssistantIntelligenceService : fallback
+RanAiTools ..> DataService
+RanAiTools ..> IntegrityService : _guardian_gate
+RanAiTools ..> ChangeIntelligenceService
+RanAiTools ..> AnomalyIntelligenceService
+RanAiTools ..> PredictiveRiskService
+RanAiTools ..> RiskCardsService
+RanAiTools ..> RagService
+RagService ..> LlmClient
+AssistantIntelligenceService ..> WebSearchService
+
+' --- Restitution / Applications ---
+WebApp ..> FastAPIApp
+MobileApp ..> FastAPIApp
+PowerBiExportService ..> DataService
+GuardianOrchestrator ..> N8nService : post-ingest
+
+' --- Acteurs <-> applications ---
+AuthUser ..> WebApp : utilise
+AuthUser ..> MobileApp : utilise
+
+note bottom of Site
+  Les entites RAN (Site, Equipment, Anomaly...)
+  ne sont pas des classes Python : ce sont des
+  lignes parquet (DuckDB) ou des tables SQLite.
+  Seuls AuthUser, FilterContext, LakePaths et
+  RouteRule sont des dataclasses typees.
+end note
+
+@enduml

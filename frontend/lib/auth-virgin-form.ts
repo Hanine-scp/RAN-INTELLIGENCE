@@ -16,9 +16,22 @@ export const AUTH_INPUT_NAMES = {
   masterKey: "ran_field_master_key",
 } as const;
 
+const REMEMBER_KEY = "ran_remember_email";
+
+export function loadAuthRememberEmail(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(REMEMBER_KEY);
+}
+
+export function saveAuthRememberEmail(email: string) {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(REMEMBER_KEY, email.trim());
+  }
+}
+
 export function clearAuthRememberEmail() {
   if (typeof window !== "undefined") {
-    window.localStorage.removeItem("ran_remember_email");
+    window.localStorage.removeItem(REMEMBER_KEY);
   }
 }
 

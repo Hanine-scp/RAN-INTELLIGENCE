@@ -11,8 +11,6 @@ import { listRecentFiles, loadRecentFile, saveRecentFile, type RecentFileRecord 
 import {
   askAssistantInsight,
   askAssistantInsightWithFiles,
-  getAssistantEngineStatus,
-  type AssistantEngineStatus,
   type AssistantInsightResponse,
   type WebSearchMeta,
 } from "@/lib/api";
@@ -255,31 +253,6 @@ export function AiAssistantChat({
   const [screenshotLoading, setScreenshotLoading] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [dataOpenIds, setDataOpenIds] = useState<Record<string, boolean>>({});
-  const [engineStatus, setEngineStatus] = useState<AssistantEngineStatus | null>(null);
-
-  const engineSubtitle = useMemo(() => {
-    if (!engineStatus) return null;
-    const parts: string[] = [];
-    if (engineStatus.claude?.enabled) {
-      parts.push(`Claude · ${engineStatus.claude.model ?? "docs"}`);
-    } else if (engineStatus.engine === "openai") {
-      parts.push(`${t(language, "ai_engine_openai")} · ${engineStatus.model ?? "GPT"}`);
-    } else {
-      parts.push(t(language, "ai_engine_local"));
-    }
-    const web = engineStatus.web_search;
-    if (web?.active_api_provider) {
-      parts.push(`Web · ${web.active_api_provider.toUpperCase()}`);
-    } else if (web?.fallback_chain?.length) {
-      parts.push(`Web · ${web.fallback_chain.join(" + ")}`);
-    }
-    return parts.join(" · ");
-  }, [engineStatus, language]);
-
-  const promptSuggestions = useMemo(
-    () => [t(language, "ai_suggest_ran"), t(language, "ai_suggest_anomalies"), t(language, "ai_suggest_noc")],
-    [language],
-  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -666,12 +639,6 @@ export function AiAssistantChat({
   }, [refreshRecent]);
 
   useEffect(() => {
-    getAssistantEngineStatus()
-      .then(setEngineStatus)
-      .catch(() => setEngineStatus(null));
-  }, []);
-
-  useEffect(() => {
     speechSessionRef.current?.abort();
     speechSessionRef.current = null;
   }, [fr]);
@@ -697,16 +664,10 @@ export function AiAssistantChat({
     <div className="ai-copilot-widget relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl">
       <header className="flex shrink-0 items-center justify-between border-b border-slate-200/80 bg-gradient-to-r from-white via-teal-50/40 to-white px-5 py-3.5">
         <div className="flex items-center gap-2">
-          <IconSpark className="ai-copilot-icon h-4 w-4 text-teal-600" />
-          <div>
-            <div className="flex items-center gap-1.5">
-              <p className="text-sm font-semibold tracking-wide text-slate-800">{t(language, "ai_copilot_name")}</p>
-              <span className="rounded-full bg-teal-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-teal-700">
-                {t(language, "ai_copilot_suite")}
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400">{engineSubtitle || t(language, "ai_copilot_tagline")}</p>
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-sm">
+            <IconSpark className="ai-copilot-icon h-4 w-4" />
           </div>
+          <p className="text-sm font-semibold tracking-wide text-slate-800">{t(language, "ai_copilot_name")}</p>
         </div>
         <button
           type="button"
@@ -726,36 +687,7 @@ export function AiAssistantChat({
       <div ref={scrollRef} className="ai-chat-scroll flex-1 overflow-y-auto px-6 py-5">
         {!hasConversation && !loading ? (
           <div className="flex h-full min-h-[280px] flex-col items-center justify-center px-4 text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-lg shadow-teal-500/20">
-              <IconSpark className="h-7 w-7" />
-            </div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-600">
-              {t(language, "ai_copilot_suite")} · {t(language, "ai_copilot_tagline")}
-            </p>
-            <h1 className="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">{t(language, "ai_greeting")}</h1>
-            <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">{t(language, "ai_greeting_hint")}</p>
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              {(["ai_cap_web", "ai_cap_xml", "ai_cap_capture", "ai_cap_data"] as const).map((key) => (
-                <span
-                  key={key}
-                  className="rounded-full border border-teal-100 bg-teal-50/60 px-3 py-1 text-[11px] font-medium text-teal-800"
-                >
-                  {t(language, key)}
-                </span>
-              ))}
-            </div>
-            <div className="mt-6 flex w-full max-w-xl flex-col gap-2">
-              {promptSuggestions.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => void submitQuestion(suggestion)}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50/40 hover:text-teal-900"
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+            <h1 className="max-w-sm text-xl font-semibold text-slate-900 sm:text-2xl">{t(language, "ai_greeting")}</h1>
           </div>
         ) : (
           <div className="space-y-4">
@@ -1046,8 +978,6 @@ export function AiAssistantChat({
             ))}
           </div>
         ) : null}
-
-        <p className="mt-2 px-1 text-center text-[10px] leading-relaxed text-slate-400">{t(language, "ai_compliance_footer")}</p>
       </form>
 
       <AiCameraModal

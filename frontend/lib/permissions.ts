@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "user";
+export type UserRole = "admin" | "responsable";
 
 export const USER_ALLOWED_ROUTES = [
   "/",
@@ -7,10 +7,12 @@ export const USER_ALLOWED_ROUTES = [
   "/sites",
   "/inventaire",
   "/asset-distribution",
+  "/automation",
   "/guardian",
   "/foresight",
-  "/insight",
   "/signals",
+  "/cartographie-reseau",
+  "/insight",
   "/statistiques",
   "/analytics",
   "/power-bi",

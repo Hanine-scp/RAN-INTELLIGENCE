@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PremiumHubTabs, type PremiumHubTabItem } from "@/components/premium-hub-tabs";
+import { HubPageReportSection } from "@/components/hub-page-report-section";
 import { AnalyticsSection } from "@/components/analytics-section";
 import { PowerBiSection } from "@/components/power-bi-section";
 import { StatisticsSection } from "@/components/statistics-section";
@@ -88,6 +89,7 @@ function InsightPageLayoutInner() {
         activeTab={activeTab}
         onTabChange={selectTab}
       />
+      <HubPageReportSection hub="insight" activeTab={activeTab} />
       <section aria-label="Insight content">
         {activeTab === "analytics" ? (
           <AnalyticsSection />

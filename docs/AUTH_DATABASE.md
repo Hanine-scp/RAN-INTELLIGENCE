@@ -132,12 +132,14 @@ python scripts/init_auth_database.py
 
 ## Compte admin par défaut
 
-Créé automatiquement au premier démarrage :
+Créé automatiquement si `SEED_DEFAULT_ADMIN=true` au premier démarrage.
 
-| Champ | Valeur |
-|-------|--------|
-| Email | `admin@ooredoo.ran` |
-| Mot de passe | `Admin@RAN2026!` |
-| Clé admin | `RAN-ADMIN-MASTER-KEY` |
+| Variable | Exemple (`.env.auth`) |
+|----------|------------------------|
+| `ADMIN_EMAIL` | `hbenahmed2001@gmail.com` |
+| `ADMIN_PHONE` | `+21623669609` |
+| `ADMIN_ACCESS_KEY` | `RAN-ADMIN-MASTER-KEY` |
+| `ADMIN_BOOTSTRAP_KEY` | `RAN-BOOTSTRAP-OOREDOO-2026` |
+| `TWILIO_FROM_NUMBER` | `+21652266224` (fallback SMS) |
 
-Variables : `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_ACCESS_KEY` dans `.env.auth`.
+Toutes les valeurs sont lues depuis `.env.auth` (voir `.env.auth.example`).

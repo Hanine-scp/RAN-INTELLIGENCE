@@ -6,7 +6,7 @@ import { HomePageLayout } from "@/components/home-page-layout";
 import { t } from "@/lib/i18n";
 import { useDashboard } from "@/lib/use-dashboard";
 import { MultiBarChart, SummaryLineChart } from "@/components/charts";
-import { CHART_PRIMARY, CHART_RING_TRACK, CHART_SECONDARY, TECH_COLORS } from "@/lib/chart-theme";
+import { CHART_NEGATIVE, CHART_PRIMARY, CHART_RING_TRACK, CHART_SECONDARY, TECH_COLORS } from "@/lib/chart-theme";
 
 export default function Home() {
   const { filters, payload } = useAppContext();
@@ -175,10 +175,10 @@ export default function Home() {
               <p className="mt-1 text-3xl font-extrabold leading-none text-slate-900">{kpiGraph.sites}</p>
               <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] font-semibold">
                 <div className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-slate-700">
-                  {filters.language === "Français" ? "Actifs" : "Active"} <span className="ml-1 text-[#1ABC9C]">{kpiGraph.active}</span>
+                  {filters.language === "Français" ? "Actifs" : "Active"} <span className="ml-1" style={{ color: CHART_PRIMARY }}>{kpiGraph.active}</span>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-slate-700">
-                  {filters.language === "Français" ? "Bloqués" : "Blocked"} <span className="ml-1 text-[#E74C3C]">{kpiGraph.blocked}</span>
+                  {filters.language === "Français" ? "Bloqués" : "Blocked"} <span className="ml-1" style={{ color: CHART_NEGATIVE }}>{kpiGraph.blocked}</span>
                 </div>
               </div>
             </article>
@@ -186,7 +186,7 @@ export default function Home() {
             <article className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-3">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-platform-navy">{filters.language === "Français" ? "Disponibilité" : "Availability"}</p>
               <p className="mt-1 text-3xl font-extrabold leading-none text-slate-900">{kpiGraph.availability}%</p>
-              <p className={`mt-2 text-[11px] font-semibold ${overview.availabilityDelta >= 0 ? "text-[#1ABC9C]" : "text-[#E74C3C]"}`}>
+              <p className="mt-2 text-[11px] font-semibold" style={{ color: overview.availabilityDelta >= 0 ? CHART_PRIMARY : CHART_NEGATIVE }}>
                 {overview.availabilityDelta >= 0 ? "+" : ""}
                 {overview.availabilityDelta}% {filters.language === "Français" ? "vs snapshot précédent" : "vs previous snapshot"}
               </p>
@@ -213,8 +213,8 @@ export default function Home() {
                 {filters.language === "Français" ? "Équipements / site" : "Equipment / site"}
               </p>
               <p className="text-3xl font-extrabold leading-none text-slate-900">{kpiGraph.equipmentPerSite}</p>
-              <div className="mt-2 h-2 rounded-full bg-teal-100">
-                <div className="h-2 rounded-full bg-teal-500" style={{ width: `${kpiGraph.equipmentDensityRate}%` }} />
+              <div className="mt-2 h-2 rounded-full bg-slate-200">
+                <div className="h-2 rounded-full" style={{ width: `${kpiGraph.equipmentDensityRate}%`, background: CHART_PRIMARY }} />
               </div>
               <p className="mt-2 text-[11px] font-semibold text-slate-500">
                 {kpiGraph.equipment} {filters.language === "Français" ? "équipements total" : "total equipment"}

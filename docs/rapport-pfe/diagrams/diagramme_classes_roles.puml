@@ -1,0 +1,100 @@
+@startuml DiagrammeClassesRoles
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype ortho
+skinparam class {
+  BackgroundColor White
+  BorderColor Black
+  ArrowColor Black
+}
+
+class Responsable {
+  +id : int
+  +email : str
+  +full_name : str
+  +phone : str
+  +role = "responsable"
+  +job_profile : str
+  +allowed_vendors : list
+  +allowed_regions : list
+  +is_active : bool
+  --
+  +authenticate()
+  +verify_mfa(otp)
+  +has_permission(perm) : bool
+  +view_dashboard()
+  +view_sites()
+  +compare_dates()
+  +use_ai_search()
+  +export_reports()
+}
+
+class Administrateur {
+  +role = "admin"
+  --
+  +import_xml()
+  +manage_snapshots()
+  +manage_users()
+  +manage_roles()
+  +manage_trust()
+  +view_ops()
+  +view_security_center()
+}
+
+class JobProfile {
+  +code : str
+  +label : str
+  +permissions : list
+}
+
+class Permission {
+  +code : str
+  +description : str
+}
+
+class Session {
+  +access_token : str
+  +refresh_token : str
+  +expires_at : datetime
+}
+
+' --- Profils metier (Responsable uniquement) ---
+class IngenieurRAN
+class IngenieurOptimisation
+class EquipeMaintenance
+class ResponsableSpares
+class DataAnalystBI
+class DataScientistIA
+class ResponsableReseau
+
+' ============================================================
+' Relations
+' ============================================================
+Administrateur --|> Responsable : herite
+
+Responsable "1" --> "1" JobProfile : possede
+JobProfile "1" --> "*" Permission : accorde
+Responsable "1" --> "*" Permission : detient
+Responsable "1" --> "*" Session : ouvre
+
+JobProfile <|-- IngenieurRAN
+JobProfile <|-- IngenieurOptimisation
+JobProfile <|-- EquipeMaintenance
+JobProfile <|-- ResponsableSpares
+JobProfile <|-- DataAnalystBI
+JobProfile <|-- DataScientistIA
+JobProfile <|-- ResponsableReseau
+
+note right of Administrateur
+  Herite de toutes les capacites
+  du Responsable + permissions
+  d'administration plateforme
+end note
+
+note bottom of JobProfile
+  Permissions de base :
+  view_sites, view_inventory,
+  compare_dates, use_ai_search,
+  view_predictions, export_reports
+end note
+@enduml

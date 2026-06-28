@@ -11,6 +11,7 @@ export const authTranslations = {
     auth_login: "Connexion",
     auth_register: "Inscription",
     auth_signup: "Inscription entreprise",
+    auth_signup_user: "Inscription",
     auth_signup_enterprise: "Inscription MFA",
     auth_verify: "Vérification",
     auth_activate: "Activation",
@@ -29,6 +30,14 @@ export const authTranslations = {
     auth_sub_register: "Créez votre compte — un email de vérification sera envoyé",
     auth_sub_register_done: "Consultez votre boîte mail et cliquez sur le lien de vérification",
     auth_sub_signup: "Créez votre compte Ooredoo RAN Intelligence",
+    auth_sub_signup_user: "Créez votre compte — votre demande sera examinée par un administrateur",
+    auth_sub_signup_user_done: "Votre demande a été envoyée. Vous recevrez un email de confirmation dès qu'un administrateur l'aura validée.",
+    auth_sub_signup_pending_title: "Demande en attente",
+    auth_signup_section_identity: "Identité",
+    auth_signup_section_profile: "Profil & organisation",
+    auth_signup_section_security: "Sécurité du compte",
+    auth_signup_submit: "Envoyer ma demande d'accès",
+    auth_signup_pending_hint: "Un administrateur examinera votre demande sous 24–48 h ouvrées.",
     auth_sub_verify: "Code email (lettres + chiffres) et code SMS (6 chiffres)",
     auth_sub_session_key: "Conservez cette clé — elle change à chaque nouvelle connexion",
     auth_sub_forgot: "Entrez votre email — nous vous enverrons un lien de réinitialisation",
@@ -39,7 +48,7 @@ export const authTranslations = {
     auth_sub_admin_done: "Compte administrateur prêt",
     auth_sub_email_verify: "Activation de votre compte RAN Intelligence",
 
-    auth_tab_user: "Utilisateur",
+    auth_tab_user: "Responsable",
     auth_tab_jwt: "Email",
     auth_tab_enterprise: "MFA",
     auth_tab_admin: "Admin",
@@ -48,6 +57,11 @@ export const authTranslations = {
     auth_full_name: "Nom complet",
     auth_confirm_password: "Confirmer le mot de passe",
     auth_job_profile: "Profil métier",
+    auth_department: "Département / équipe",
+    auth_employee_id: "Matricule",
+    auth_placeholder_department: "Ex : NOC RAN · Tunis",
+    auth_placeholder_employee_id: "Ex : OO-12345",
+    auth_placeholder_phone: "+216 XX XXX XXX",
     auth_bootstrap_key: "Clé bootstrap",
     auth_email_code: "Code email",
     auth_sms_code: "Code SMS",
@@ -77,6 +91,7 @@ export const authTranslations = {
     auth_placeholder_forgot_email: "prenom.nom@ooredoo.tn",
 
     auth_forgot_password_link: "Mot de passe oublié",
+    auth_remember_me: "Se souvenir de moi",
     auth_resend_codes: "Renvoyer les codes",
     auth_resend_verification: "Renvoyer l'email de vérification",
     auth_otp_resend_in: "Renvoyer dans",
@@ -93,6 +108,8 @@ export const authTranslations = {
     auth_verify_in_progress: "Vérification en cours…",
 
     auth_no_account: "Pas de compte ?",
+    auth_accounts_admin_managed:
+      "Les comptes sont créés par un administrateur. Vous recevrez un email de vérification lors de l'activation.",
     auth_has_account: "Déjà un compte ?",
     auth_back_to_login: "Retour à la connexion",
     auth_setup_admin_link: "Setup admin",
@@ -113,23 +130,32 @@ export const authTranslations = {
     auth_dev_fallback: "Secours dev uniquement",
 
     auth_notifications_hint: "Email/SMS : configurez .env.auth (voir docs/AUTH_NOTIFICATIONS_SETUP.md)",
-    auth_notifications_admin_hint: "Configurez SMTP et Twilio dans .env.auth pour recevoir les codes.",
+    auth_notifications_admin_hint:
+      "Configurez MAILTRAP_API_TOKEN et VONAGE_API_KEY/VONAGE_API_SECRET dans .env.auth pour recevoir les codes.",
 
     auth_info_codes_sent: "Email et SMS envoyés. Saisissez les codes reçus.",
     auth_info_account_created_dev:
-      "Compte créé. Configurez SMTP/Twilio dans .env.auth pour recevoir email et SMS. Utilisez les codes ci-dessous en mode dev.",
+      "Compte créé. Remplissez MAILTRAP_API_TOKEN et VONAGE_API_KEY/SECRET dans .env.auth (AUTH_DEV_MODE=true pour secours dev).",
     auth_info_admin_created_dev:
-      "Compte créé. Configurez SMTP/Twilio ou utilisez les codes dev ci-dessous.",
+      "Compte créé. Configurez Mailtrap + Vonage Verify dans .env.auth ou utilisez les codes dev.",
     auth_info_dev_codes_ready:
       "Codes disponibles ci-dessous (mode dev). Saisissez-les pour activer votre compte.",
     auth_err_notifications_failed:
-      "Email et SMS non envoyés — vérifiez SMTP_USER/SMTP_PASS (Mailtrap) et TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN dans .env.auth, puis redémarrez l'API.",
+      "Email et SMS non envoyés — vérifiez MAILTRAP_API_TOKEN/SMTP_PASS et VONAGE_API_KEY/SECRET dans .env.auth, puis redémarrez l'API.",
     auth_mailtrap_sandbox_hint:
       "Mailtrap Sandbox : les emails n'arrivent pas dans Gmail — consultez votre inbox sur mailtrap.io.",
     auth_info_codes_resent: "Nouveaux codes générés.",
     auth_info_mfa_sent: "Codes envoyés par email et SMS.",
+    auth_security_verify: "Vérification de sécurité",
+    auth_sub_login_security: "Deux tentatives incorrectes — confirmez votre identité par email.",
+    auth_info_security_verify: "Vérification de sécurité requise. Consultez votre email.",
+    auth_info_security_code_sent: "Nouveau code de sécurité envoyé.",
+    auth_info_security_cleared: "Identité vérifiée. Vous pouvez vous reconnecter.",
+    auth_security_verify_hint: "Pour protéger votre compte, saisissez le code reçu par email avant de réessayer.",
+    auth_security_code: "Code de sécurité email",
 
     auth_err_signup_denied: "Inscription refusée",
+    auth_err_full_name: "Nom complet requis.",
     auth_err_login_denied: "Authentification refusée",
     auth_err_mfa_failed: "Validation MFA échouée",
     auth_err_verify_failed: "Vérification échouée",
@@ -183,6 +209,7 @@ export const authTranslations = {
     auth_login: "Login",
     auth_register: "Sign Up",
     auth_signup: "Enterprise Sign Up",
+    auth_signup_user: "Sign Up",
     auth_signup_enterprise: "MFA Sign Up",
     auth_verify: "Verify",
     auth_activate: "Activate",
@@ -201,6 +228,14 @@ export const authTranslations = {
     auth_sub_register: "Create your account — a verification email will be sent",
     auth_sub_register_done: "Check your inbox and click the verification link",
     auth_sub_signup: "Create your Ooredoo RAN Intelligence account",
+    auth_sub_signup_user: "Create your account — an administrator will review your request",
+    auth_sub_signup_user_done: "Your request has been submitted. You will receive a confirmation email once an administrator approves it.",
+    auth_sub_signup_pending_title: "Request pending",
+    auth_signup_section_identity: "Identity",
+    auth_signup_section_profile: "Profile & organization",
+    auth_signup_section_security: "Account security",
+    auth_signup_submit: "Submit access request",
+    auth_signup_pending_hint: "An administrator will review your request within 1–2 business days.",
     auth_sub_verify: "Email code (letters + numbers) and SMS code (6 digits)",
     auth_sub_session_key: "Keep this key — it changes at each new login",
     auth_sub_forgot: "Enter your email — we will send a reset link",
@@ -211,7 +246,7 @@ export const authTranslations = {
     auth_sub_admin_done: "Administrator account ready",
     auth_sub_email_verify: "Activate your RAN Intelligence account",
 
-    auth_tab_user: "User",
+    auth_tab_user: "Responsible",
     auth_tab_jwt: "Email",
     auth_tab_enterprise: "MFA",
     auth_tab_admin: "Admin",
@@ -220,6 +255,11 @@ export const authTranslations = {
     auth_full_name: "Full name",
     auth_confirm_password: "Confirm password",
     auth_job_profile: "Job profile",
+    auth_department: "Department / team",
+    auth_employee_id: "Employee ID",
+    auth_placeholder_department: "e.g. RAN NOC · Tunis",
+    auth_placeholder_employee_id: "e.g. OO-12345",
+    auth_placeholder_phone: "+216 XX XXX XXX",
     auth_bootstrap_key: "Bootstrap key",
     auth_email_code: "Email code",
     auth_sms_code: "SMS code",
@@ -249,6 +289,7 @@ export const authTranslations = {
     auth_placeholder_forgot_email: "firstname.lastname@ooredoo.tn",
 
     auth_forgot_password_link: "Forgot password",
+    auth_remember_me: "Remember me",
     auth_resend_codes: "Resend codes",
     auth_resend_verification: "Resend verification email",
     auth_otp_resend_in: "Resend in",
@@ -265,6 +306,8 @@ export const authTranslations = {
     auth_verify_in_progress: "Verifying…",
 
     auth_no_account: "No account?",
+    auth_accounts_admin_managed:
+      "Accounts are created by an administrator. You will receive a verification email when your access is activated.",
     auth_has_account: "Already have an account?",
     auth_back_to_login: "Back to login",
     auth_setup_admin_link: "Admin setup",
@@ -285,22 +328,32 @@ export const authTranslations = {
     auth_dev_fallback: "Dev fallback only",
 
     auth_notifications_hint: "Email/SMS: configure .env.auth (see docs/AUTH_NOTIFICATIONS_SETUP.md)",
-    auth_notifications_admin_hint: "Configure SMTP and Twilio in .env.auth to receive codes.",
+    auth_notifications_admin_hint:
+      "Set MAILTRAP_API_TOKEN and VONAGE_API_KEY/VONAGE_API_SECRET in .env.auth to receive codes.",
 
     auth_info_codes_sent: "Email and SMS sent. Enter the codes you received.",
     auth_info_account_created_dev:
-      "Account created. Configure SMTP/Twilio in .env.auth to receive email and SMS. Use the codes below in dev mode.",
-    auth_info_admin_created_dev: "Account created. Configure SMTP/Twilio or use the dev codes below.",
+      "Account created. Fill MAILTRAP_API_TOKEN and VONAGE_API_KEY/SECRET in .env.auth (AUTH_DEV_MODE=true for dev fallback).",
+    auth_info_admin_created_dev:
+      "Account created. Configure Mailtrap + Vonage Verify in .env.auth or use the dev codes below.",
     auth_info_dev_codes_ready:
       "Codes available below (dev mode). Enter them to activate your account.",
     auth_err_notifications_failed:
-      "Email and SMS were not sent — check SMTP_USER/SMTP_PASS (Mailtrap) and TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN in .env.auth, then restart the API.",
+      "Email and SMS were not sent — check MAILTRAP_API_TOKEN/SMTP_PASS and VONAGE_API_KEY/SECRET in .env.auth, then restart the API.",
     auth_mailtrap_sandbox_hint:
       "Mailtrap Sandbox: emails do not arrive in Gmail — check your inbox at mailtrap.io.",
     auth_info_codes_resent: "New codes generated.",
     auth_info_mfa_sent: "Codes sent by email and SMS.",
+    auth_security_verify: "Security verification",
+    auth_sub_login_security: "Two failed attempts — confirm your identity by email.",
+    auth_info_security_verify: "Security verification required. Check your email.",
+    auth_info_security_code_sent: "New security code sent.",
+    auth_info_security_cleared: "Identity verified. You can sign in again.",
+    auth_security_verify_hint: "To protect your account, enter the code sent by email before retrying.",
+    auth_security_code: "Email security code",
 
     auth_err_signup_denied: "Sign up denied",
+    auth_err_full_name: "Full name is required.",
     auth_err_login_denied: "Authentication denied",
     auth_err_mfa_failed: "MFA validation failed",
     auth_err_verify_failed: "Verification failed",

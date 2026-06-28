@@ -1,0 +1,45 @@
+# ============================================================
+#  Stack IA 100% locale — sécurité maximale des données
+#  Ollama (LLM local) + SearXNG (recherche web auto-hébergée)
+#
+#  Démarrage :  docker compose -f docker-compose.local-ai.yml up -d
+#
+#  NOTE GPU (Windows) : pour exploiter un GPU NVIDIA, l'option la plus
+#  simple est d'installer Ollama en NATIF (https://ollama.com/download) —
+#  il détecte le GPU automatiquement. Le service "ollama" ci-dessous est
+#  fourni pour un déploiement Docker (décommentez le bloc "deploy" GPU si
+#  votre Docker Desktop a l'accès GPU WSL2 activé).
+# ============================================================
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ran-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # --- GPU NVIDIA (décommenter si Docker Desktop a l'accès GPU) ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: ran-searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./infra/searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+      - INSTANCE_NAME=ran-searxng
+
+volumes:
+  ollama_data:

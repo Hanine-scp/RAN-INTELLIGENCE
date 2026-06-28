@@ -342,6 +342,16 @@ def _general_discovery(ctx: FilterContext, question: str) -> dict[str, Any]:
 
 
 def _narrate_data_insight(ctx: FilterContext, question: str, raw: dict[str, Any]) -> dict[str, Any]:
+    from src.services.report_prompt_utils import is_expert_report_prompt
+
+    existing = str(raw.get("message") or "").strip()
+    if is_expert_report_prompt(question) or existing.startswith("## ") or "\n## " in existing:
+        result = dict(raw)
+        result["message"] = existing if ("## " in existing) else ""
+        result["suggested_questions"] = raw.get("suggested_questions") or _flexible_suggestions(_is_french(ctx))
+        result["assistant_brand"] = BRAND
+        return result
+
     fr = _is_french(ctx)
     intent = str(raw.get("intent") or "insight")
     rows = raw.get("rows") or []

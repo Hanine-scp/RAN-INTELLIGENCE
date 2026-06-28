@@ -102,6 +102,14 @@ const PATHS: Record<string, React.ReactNode> = {
       <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
     </>
   ),
+  workflow: (
+    <>
+      <circle cx="6" cy="6" r="2.2" />
+      <circle cx="18" cy="6" r="2.2" />
+      <circle cx="12" cy="18" r="2.2" />
+      <path d="M8 6h8M7.2 7.6 10.8 16.4M16.8 7.6 13.2 16.4" />
+    </>
+  ),
 };
 
 export function NavIcon({ name, className = "h-5 w-5", style }: NavIconProps) {

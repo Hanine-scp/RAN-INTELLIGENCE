@@ -4,7 +4,6 @@ import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssetsEquipmentSection } from "@/components/assets-equipment-section";
 import { GlobalCountersSection } from "@/components/global-counters-section";
-import { GuardianSearchPanel } from "@/components/guardian-search-panel";
 import { HomeDataHubTabs, type HomeHubTab } from "@/components/home-data-hub-tabs";
 import { HomeHubReportSection } from "@/components/home-hub-report-section";
 import { InventoryDetailSection } from "@/components/inventory-detail-section";
@@ -51,8 +50,6 @@ function HomePageLayoutInner({ dashboard }: { dashboard: ReactNode }) {
 
   return (
     <div className="space-y-4">
-      <GuardianSearchPanel language={filters.language} payload={payload} />
-
       <HomeDataHubTabs
         language={filters.language}
         activeTab={activeTab}

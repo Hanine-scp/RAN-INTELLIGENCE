@@ -35,20 +35,50 @@ function formatApiDetail(detail: unknown): string {
       })
       .join(" · ");
   }
-  if (typeof detail === "object") return JSON.stringify(detail);
+  if (typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    if (typeof record.code === "string") {
+      return String(record.message ?? record.code);
+    }
+    return JSON.stringify(detail);
+  }
   return String(detail);
 }
 
+export class ApiFlowError extends Error {
+  code: string;
+  data: Record<string, unknown>;
+
+  constructor(code: string, message: string, data: Record<string, unknown>) {
+    super(message);
+    this.name = "ApiFlowError";
+    this.code = code;
+    this.data = data;
+  }
+}
+
 async function parseApiError(response: Response, path: string): Promise<never> {
-  let detail = "";
   try {
     const body = (await response.json()) as { detail?: unknown };
+    if (body.detail && typeof body.detail === "object" && !Array.isArray(body.detail)) {
+      const detail = body.detail as Record<string, unknown>;
+      if (typeof detail.code === "string") {
+        throw new ApiFlowError(
+          detail.code,
+          String(detail.message ?? detail.code),
+          detail,
+        );
+      }
+    }
     const formatted = formatApiDetail(body.detail);
-    detail = formatted ? ` — ${formatted}` : "";
-  } catch {
-    detail = "";
+    const detail = formatted ? ` — ${formatted}` : "";
+    throw new Error(`API request failed: ${path} (${response.status})${detail}`);
+  } catch (error) {
+    if (error instanceof ApiFlowError || error instanceof Error) {
+      throw error;
+    }
+    throw new Error(`API request failed: ${path} (${response.status})`);
   }
-  throw new Error(`API request failed: ${path} (${response.status})${detail}`);
 }
 
 export async function refreshAuthSession(): Promise<AuthSession | null> {
@@ -825,6 +855,11 @@ export function adminCreateUser(payload: {
   department: string;
   employee_id?: string;
   password?: string;
+  send_email_otp?: boolean;
+  send_sms_otp?: boolean;
+  force_password_change?: boolean;
+  allowed_regions?: string;
+  allowed_vendors?: string;
 }) {
   return postJson<{
     user_id: number;
@@ -833,11 +868,14 @@ export function adminCreateUser(payload: {
     message: string;
     temporary_password: string;
     personal_access_key: string;
+    must_change_password?: boolean;
+    notifications?: { email_otp?: boolean; sms_otp?: boolean; welcome_email?: boolean };
     verification: {
-      email_expires_at: string;
-      phone_expires_at: string;
+      email_expires_at: string | null;
+      phone_expires_at: string | null;
       dev_email_code?: string;
       dev_phone_code?: string;
+      requires_sms?: boolean;
     };
   }>("/auth/users/create", payload);
 }
@@ -849,6 +887,8 @@ export function adminVerifyUser(userId: number, payload: { email_code: string; p
 export function resendProvisionOtp(userId: number) {
   return postJson<{
     user_id: number;
+    message?: string;
+    notifications?: { email_otp?: boolean; sms_otp?: boolean };
     verification: {
       email_expires_at: string;
       phone_expires_at: string;
@@ -858,19 +898,51 @@ export function resendProvisionOtp(userId: number) {
   }>(`/auth/users/${userId}/resend-provision-otp`, {});
 }
 
-export function registerAccount(payload: { email: string; password: string; full_name: string }) {
+export function registerAccount(payload: {
+  email: string;
+  password: string;
+  full_name: string;
+  phone: string;
+  job_profile: string;
+  department?: string;
+  employee_id?: string;
+}) {
   return postJson<{
     user_id: number;
     email: string;
     message: string;
-    email_sent: boolean;
-    verify_url?: string;
-    dev_verify_token?: string;
+    pending_admin_approval?: boolean;
   }>("/auth/register", payload, false);
 }
 
+export function approveUserAccess(userId: number) {
+  return postJson<{ user_id: number; message: string; email_sent: boolean }>(`/auth/users/${userId}/approve-access`, {});
+}
+
+export function rejectUserAccess(userId: number) {
+  return postJson<{ user_id: number; message: string }>(`/auth/users/${userId}/reject-access`, {});
+}
+
 export function loginAuth(payload: { email: string; password: string }) {
-  return postJson<AuthSession>("/auth/login", payload, false);
+  return postJson<AuthSession & { must_change_password?: boolean }>("/auth/login", payload, false);
+}
+
+export function verifyLoginSecurity(payload: { user_id: number; email_code: string }) {
+  return postJson<{ message: string; cleared: boolean }>("/auth/login/security/verify", payload, false);
+}
+
+export function resendLoginSecurityOtp(userId: number) {
+  return postJson<{
+    user_id: number;
+    message?: string;
+    verification: {
+      email_expires_at: string;
+      dev_email_code?: string;
+      contact?: { email_masked?: string; phone_masked?: string };
+      resend_after_seconds?: number;
+      otp_expires_minutes?: number;
+    };
+  }>("/auth/login/security/resend", { user_id: userId }, false);
 }
 
 export function forgotPassword(payload: { email: string; channel?: "email" | "sms"; recovery_email?: string }) {
@@ -952,7 +1024,17 @@ export function resendSignupOtp(userId: number) {
 }
 
 export function getNotificationsStatus() {
-  return getJson<{ enabled: boolean; email_ready: boolean; sms_ready: boolean }>("/auth/notifications/status", false);
+  return getJson<{
+    enabled: boolean;
+    dev_mode?: boolean;
+    email_ready: boolean;
+    sms_ready: boolean;
+    email_otp_ready?: boolean;
+    sms_otp_ready?: boolean;
+    sms_provider?: string;
+    vonage_verify_ready?: boolean;
+    twilio_verify_ready?: boolean;
+  }>("/auth/notifications/status", false);
 }
 
 export { getBootstrapStatus, bootstrapAdminSignup, resendBootstrapAdminOtp, verifyBootstrapAdmin } from "@/lib/auth-api";
@@ -988,7 +1070,28 @@ export function loginUserStep1(payload: { email: string; password: string }) {
 }
 
 export function loginUserStep2(payload: { user_id: number; email_code: string; phone_code: string }) {
-  return postJson<AuthSession & { session_access_key?: string }>("/auth/login/user/mfa", payload, false);
+  return postJson<AuthSession & { session_access_key?: string; must_change_password?: boolean }>(
+    "/auth/login/user/mfa",
+    payload,
+    false,
+  );
+}
+
+export function resendLoginUserMfa(userId: number) {
+  return postJson<{
+    user_id: number;
+    message?: string;
+    requires_sms?: boolean;
+    verification: {
+      email_expires_at: string;
+      phone_expires_at?: string;
+      dev_email_code?: string;
+      dev_phone_code?: string;
+      contact?: { email_masked?: string; phone_masked?: string };
+      resend_after_seconds?: number;
+      otp_expires_minutes?: number;
+    };
+  }>("/auth/login/user/mfa/resend", { user_id: userId }, false);
 }
 
 export function loginAdminStep1(payload: { email: string; password: string; master_key: string }) {
@@ -1011,6 +1114,23 @@ export function loginAdminStep2(payload: { user_id: number; email_code: string; 
   return postJson<AuthSession>("/auth/login/admin/verify", payload, false);
 }
 
+export function resendLoginAdminMfa(userId: number) {
+  return postJson<{
+    user_id: number;
+    message?: string;
+    requires_sms?: boolean;
+    verification: {
+      email_expires_at: string;
+      phone_expires_at?: string;
+      dev_email_code?: string;
+      dev_phone_code?: string;
+      contact?: { email_masked?: string; phone_masked?: string };
+      resend_after_seconds?: number;
+      otp_expires_minutes?: number;
+    };
+  }>("/auth/login/admin/mfa/resend", { user_id: userId }, false);
+}
+
 export function fetchAuthMe() {
   return getJson<AuthUser>("/auth/me");
 }
@@ -1023,6 +1143,38 @@ export async function logoutSession() {
 
 export function listAuthUsers() {
   return getJson<Record<string, unknown>[]>("/auth/users");
+}
+
+export function getSecurityCenterSummary() {
+  return getJson<{
+    failed_logins_today: number;
+    security_locked_accounts: number;
+    pending_otp_accounts: number;
+    active_users: number;
+    active_admins: number;
+    total_accounts: number;
+    recent_security_events: Array<{
+      action: string;
+      detail: string;
+      created_at: string;
+      user_id: number | null;
+    }>;
+  }>("/auth/security/summary");
+}
+
+export function getSecurityAudit(limit = 100) {
+  return getJson<
+    Array<{
+      id: number;
+      user_id: number | null;
+      action: string;
+      detail: string;
+      created_at: string;
+      email?: string;
+      full_name?: string;
+      role?: string;
+    }>
+  >(`/auth/security/audit?limit=${limit}`);
 }
 
 export function createAccessKey(payload: { key_label: string; key_type: string; max_uses: number }) {
@@ -1072,6 +1224,32 @@ export function getPowerBiStatus() {
 
 export function syncPowerBiExport() {
   return postJson<PowerBiStatus & { missing?: string[]; synced_at?: string }>("/integrations/powerbi/sync", {});
+}
+
+export type N8nWorkflow = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  configured: boolean;
+};
+
+export type N8nStatus = {
+  enabled: boolean;
+  baseUrl: string;
+  embedUrl: string;
+  workflows: N8nWorkflow[];
+};
+
+export function getN8nStatus() {
+  return getJson<N8nStatus>("/integrations/n8n/status");
+}
+
+export function triggerN8nWorkflow(workflowId: string, payload: Record<string, unknown> = {}) {
+  return postJson<{ webhook: string; status: string; response: unknown }>(
+    `/integrations/n8n/workflows/${workflowId}/trigger`,
+    payload,
+  );
 }
 
 export function startAuthKeepAlive(): () => void {

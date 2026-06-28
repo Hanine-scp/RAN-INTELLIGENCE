@@ -22,7 +22,7 @@ export const navSections: NavSection[] = [
     label: { Français: "Supervision", English: "Supervision" },
     items: [
       { href: "/timeline", key: "nav_timeline", icon: "compare" },
-      { href: "/guardian", key: "nav_guardian", icon: "shield" },
+      { href: "/automation", key: "nav_automation", icon: "workflow" },
     ],
   },
   {
@@ -31,15 +31,13 @@ export const navSections: NavSection[] = [
   },
   {
     label: { Français: "Intelligence", English: "Intelligence" },
-    items: [
-      { href: "/insight", key: "nav_insight", icon: "bars" },
-      { href: "/signals", key: "nav_signals", icon: "sparkles" },
-    ],
+    items: [{ href: "/signals", key: "nav_signals", icon: "sparkles" }],
   },
   {
     label: { Français: "Plateforme", English: "Platform" },
     items: [
       { href: "/ai-assistant", key: "nav_ai", icon: "sparkles" },
+      { href: "/power-bi", key: "nav_cartographie_reseau", icon: "bars" },
       { href: "/import", key: "nav_import", icon: "upload" },
       { href: "/ops", key: "nav_ops", icon: "pulse" },
     ],

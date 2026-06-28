@@ -8,54 +8,33 @@ import {
   AuthField,
   AuthLayout,
   AuthLink,
+  AuthModeTabs,
   AuthPrimaryButton,
   AuthSecondaryButton,
   AuthVirginForm,
-  authTypography,
 } from "@/components/auth-layout";
-import { OtpDeliveryBanner, OtpPremiumInput } from "@/components/auth-otp-premium";
+import { OtpDeliveryBanner, OtpPremiumInput, OtpResendCountdown } from "@/components/auth-otp-premium";
 import { useAuth } from "@/components/auth-provider";
 import { getBootstrapStatus } from "@/lib/auth-api";
 import {
+  ApiFlowError,
   loginAdminStep1,
   loginAdminStep2,
   loginAuth,
   loginUserStep1,
   loginUserStep2,
+  resendLoginAdminMfa,
+  resendLoginSecurityOtp,
+  resendLoginUserMfa,
   resendVerificationEmail,
+  verifyLoginSecurity,
 } from "@/lib/api";
-import { AUTH_INPUT_NAMES, clearAuthRememberEmail, useVirginFormKey } from "@/lib/auth-virgin-form";
+import { AUTH_INPUT_NAMES, clearAuthRememberEmail, loadAuthRememberEmail, saveAuthRememberEmail, useVirginFormKey } from "@/lib/auth-virgin-form";
+import { isPublicSignupEnabled } from "@/lib/auth-signup-policy";
 import { useLocale } from "@/lib/use-locale";
 
 type Mode = "user" | "admin";
-type Step = "credentials" | "mfa" | "session_key";
-
-function LoginModeTabs({ mode, onChange }: { mode: Mode; onChange: (mode: Mode) => void }) {
-  const { ta } = useLocale();
-  const items: { id: Mode; label: string }[] = [
-    { id: "user", label: ta("auth_tab_user") },
-    { id: "admin", label: ta("auth_tab_admin") },
-  ];
-
-  return (
-    <div className="mb-4 grid grid-cols-2 gap-1.5">
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          onClick={() => onChange(item.id)}
-          className={`rounded-md border px-1 py-1.5 transition sm:px-1.5 ${
-            mode === item.id
-              ? "border-white/50 bg-white/20 text-[15px] font-medium tracking-wide text-white"
-              : "border-white/15 text-[15px] font-medium tracking-wide text-white/65 hover:border-white/30 hover:text-white/90"
-          }`}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
-}
+type Step = "credentials" | "security" | "mfa" | "session_key";
 
 export function LoginForm() {
   const router = useRouter();
@@ -78,15 +57,21 @@ export function LoginForm() {
   const [emailMasked, setEmailMasked] = useState("");
   const [phoneMasked, setPhoneMasked] = useState("");
   const [otpExpiresMinutes, setOtpExpiresMinutes] = useState(10);
+  const [resendAfterSeconds, setResendAfterSeconds] = useState(59);
   const [info, setInfo] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessionAccessKey, setSessionAccessKey] = useState("");
   const [bootstrapEnabled, setBootstrapEnabled] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const virginFormKey = useVirginFormKey();
 
   useEffect(() => {
-    clearAuthRememberEmail();
+    const saved = loadAuthRememberEmail();
+    if (saved) {
+      setEmail(saved);
+      setRememberMe(true);
+    }
     getBootstrapStatus()
       .then((s) => setBootstrapEnabled(s.bootstrap_enabled))
       .catch(() => setBootstrapEnabled(false));
@@ -111,6 +96,7 @@ export function LoginForm() {
     dev_phone_code?: string;
     contact?: { email_masked?: string; phone_masked?: string };
     otp_expires_minutes?: number;
+    resend_after_seconds?: number;
   }) => {
     if (!verification) return;
     setDevEmailCode(verification.dev_email_code ?? "");
@@ -118,6 +104,32 @@ export function LoginForm() {
     setEmailMasked(verification.contact?.email_masked ?? "");
     setPhoneMasked(verification.contact?.phone_masked ?? "");
     setOtpExpiresMinutes(verification.otp_expires_minutes ?? 10);
+    setResendAfterSeconds(verification.resend_after_seconds ?? 59);
+  };
+
+  const handleLoginSecurityRequired = (err: ApiFlowError) => {
+    const userIdValue = Number(err.data.user_id);
+    if (!Number.isFinite(userIdValue)) return false;
+    setUserId(userIdValue);
+    setStep("security");
+    setError("");
+    setInfo(String(err.data.message ?? ta("auth_info_security_verify")));
+    applyVerificationMeta(err.data.verification as Parameters<typeof applyVerificationMeta>[0]);
+    return true;
+  };
+
+  const finishLogin = (session: Awaited<ReturnType<typeof loginAuth>>, mustChange?: boolean) => {
+    if (rememberMe && email.trim()) {
+      saveAuthRememberEmail(email.trim());
+    } else {
+      clearAuthRememberEmail();
+    }
+    setSession(session);
+    if (mustChange || session.must_change_password) {
+      router.replace("/reset-password?forced=1");
+      return;
+    }
+    router.replace(searchParams.get("next") || "/");
   };
 
   const onModeChange = (next: Mode) => {
@@ -144,6 +156,56 @@ export function LoginForm() {
     }
   };
 
+  const onResendMfa = async () => {
+    if (!userId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const data = mode === "admin" ? await resendLoginAdminMfa(userId) : await resendLoginUserMfa(userId);
+      setInfo(data.message || ta("auth_info_mfa_sent"));
+      if (mode === "user" && data.requires_sms !== undefined) {
+        setRequiresSms(data.requires_sms);
+      }
+      applyVerificationMeta(data.verification);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : ta("auth_err_resend_failed"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onResendSecurity = async () => {
+    if (!userId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const data = await resendLoginSecurityOtp(userId);
+      setInfo(data.message || ta("auth_info_security_code_sent"));
+      applyVerificationMeta(data.verification);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : ta("auth_err_resend_failed"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onSecurityVerify = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!userId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const data = await verifyLoginSecurity({ user_id: userId, email_code: emailCode.trim() });
+      setInfo(data.message || ta("auth_info_security_cleared"));
+      setEmailCode("");
+      setStep("credentials");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : ta("auth_err_mfa_failed"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const onCredentials = async (event: FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -154,21 +216,34 @@ export function LoginForm() {
 
     try {
       if (mode === "admin") {
-        const data = await loginAdminStep1({ email, password, master_key: masterKey });
-        setUserId(data.user_id);
-        setRequiresSms(true);
-        setStep("mfa");
-        setInfo(data.message || ta("auth_info_mfa_sent"));
-        applyVerificationMeta(data.verification);
+        try {
+          const data = await loginAdminStep1({ email, password, master_key: masterKey });
+          if (!data.mfa_required) {
+            finishLogin(data as unknown as Awaited<ReturnType<typeof loginAuth>>);
+            return;
+          }
+          setUserId(data.user_id);
+          setRequiresSms(true);
+          setStep("mfa");
+          setInfo(data.message || ta("auth_info_mfa_sent"));
+          applyVerificationMeta(data.verification);
+        } catch (err) {
+          if (err instanceof ApiFlowError && err.code === "login_security_required" && handleLoginSecurityRequired(err)) {
+            return;
+          }
+          throw err;
+        }
         return;
       }
 
       try {
         const session = await loginAuth({ email, password });
-        setSession(session);
-        router.replace(searchParams.get("next") || "/");
+        finishLogin(session);
         return;
       } catch (jwtErr) {
+        if (jwtErr instanceof ApiFlowError && jwtErr.code === "login_security_required" && handleLoginSecurityRequired(jwtErr)) {
+          return;
+        }
         const jwtMessage = jwtErr instanceof Error ? jwtErr.message : ta("auth_err_login_denied");
         const lower = jwtMessage.toLowerCase();
         if (lower.includes("email not verified") || lower.includes("inactive")) {
@@ -176,12 +251,24 @@ export function LoginForm() {
         }
         try {
           const data = await loginUserStep1({ email, password });
+          if (!data.mfa_required) {
+            const session = data as unknown as Awaited<ReturnType<typeof loginAuth>>;
+            finishLogin(session, session.must_change_password);
+            return;
+          }
           setUserId(data.user_id);
           setRequiresSms(data.requires_sms ?? true);
           setStep("mfa");
           setInfo(data.message || ta("auth_info_mfa_sent"));
           applyVerificationMeta(data.verification);
-        } catch {
+        } catch (enterpriseErr) {
+          if (
+            enterpriseErr instanceof ApiFlowError &&
+            enterpriseErr.code === "login_security_required" &&
+            handleLoginSecurityRequired(enterpriseErr)
+          ) {
+            return;
+          }
           throw jwtErr;
         }
       }
@@ -200,14 +287,14 @@ export function LoginForm() {
     try {
       const payload = { user_id: userId, email_code: emailCode.trim(), phone_code: phoneCode.trim() };
       const session = mode === "admin" ? await loginAdminStep2(payload) : await loginUserStep2(payload);
-      setSession(session);
       if (mode === "user" && (session.session_access_key || session.message)) {
+        setSession(session);
         setSessionAccessKey(session.session_access_key || "");
         setInfo(session.message || "");
         setStep("session_key");
         return;
       }
-      router.replace(searchParams.get("next") || "/");
+      finishLogin(session, session.must_change_password);
     } catch (err) {
       setError(err instanceof Error ? err.message : ta("auth_err_mfa_failed"));
     } finally {
@@ -216,18 +303,26 @@ export function LoginForm() {
   };
 
   const formTitle =
-    step === "session_key" ? ta("auth_session_key") : step === "credentials" ? ta("auth_login") : ta("auth_verify");
+    step === "session_key"
+      ? ta("auth_session_key")
+      : step === "security"
+        ? ta("auth_security_verify")
+        : step === "credentials"
+          ? ta("auth_login")
+          : ta("auth_verify");
 
   const formSubtitle =
     step === "session_key"
       ? ta("auth_sub_login_session_key")
-      : step === "credentials"
-        ? mode === "admin"
-          ? ta("auth_sub_login_admin")
-          : ta("auth_sub_login_user")
-        : mode === "admin"
-          ? ta("auth_sub_login_mfa_admin")
-          : ta("auth_sub_login_mfa");
+      : step === "security"
+        ? ta("auth_sub_login_security")
+        : step === "credentials"
+          ? mode === "admin"
+            ? ta("auth_sub_login_admin")
+            : ta("auth_sub_login_user")
+          : mode === "admin"
+            ? ta("auth_sub_login_mfa_admin")
+            : ta("auth_sub_login_mfa");
 
   const showResendVerification =
     mode === "user" && step === "credentials" && error.toLowerCase().includes("email not verified");
@@ -235,20 +330,25 @@ export function LoginForm() {
   const forgotHref =
     mode === "admin" ? "/forgot-password?mode=admin" : "/forgot-password?mode=user";
 
+  const publicSignup = isPublicSignupEnabled();
+
   return (
     <AuthLayout
       formTitle={formTitle}
-      formSubtitle={formSubtitle}
+      formSubtitle={step === "credentials" ? undefined : formSubtitle}
       footer={
         <>
-          {ta("auth_no_account")} <AuthLink href="/register">{ta("auth_register")}</AuthLink>
-          {" · "}
-          <AuthLink href="/signup">{ta("auth_signup_enterprise")}</AuthLink>
+          {publicSignup && step === "credentials" && mode === "user" ? (
+            <p>
+              {ta("auth_no_account")} <AuthLink href="/signup">{ta("auth_signup_user")}</AuthLink>
+            </p>
+          ) : (
+            <p>{ta("auth_accounts_admin_managed")}</p>
+          )}
           {bootstrapEnabled ? (
-            <>
-              {" · "}
+            <p className="mt-2">
               <AuthLink href="/admin/setup">{ta("auth_setup_admin_link")}</AuthLink>
-            </>
+            </p>
           ) : null}
         </>
       }
@@ -272,7 +372,27 @@ export function LoginForm() {
         </div>
       ) : null}
 
-      {step === "credentials" ? <LoginModeTabs mode={mode} onChange={onModeChange} /> : null}
+      {step === "credentials" ? (
+        <AuthModeTabs mode={mode} onChange={onModeChange} userHint={ta("auth_sub_login_user")} />
+      ) : null}
+
+      {step === "security" ? (
+        <AuthVirginForm key={`${virginFormKey}-security`} onSubmit={onSecurityVerify} className="space-y-3">
+          <AuthAlert tone="warning">{ta("auth_security_verify_hint")}</AuthAlert>
+          <OtpDeliveryBanner emailMasked={emailMasked} expiresMinutes={otpExpiresMinutes} />
+          <OtpPremiumInput
+            label={ta("auth_security_code")}
+            value={emailCode}
+            onChange={setEmailCode}
+            name={AUTH_INPUT_NAMES.emailOtp}
+            placeholder={ta("auth_placeholder_email_otp_short")}
+            autoComplete="one-time-code"
+          />
+          <AuthPrimaryButton disabled={loading}>{loading ? "..." : ta("auth_verify")}</AuthPrimaryButton>
+          <OtpResendCountdown seconds={resendAfterSeconds} disabled={loading} onResend={() => void onResendSecurity()} />
+          <AuthSecondaryButton onClick={resetAll}>{ta("auth_restart")}</AuthSecondaryButton>
+        </AuthVirginForm>
+      ) : null}
 
       {error ? <AuthAlert tone="error">{error}</AuthAlert> : null}
       {error.toLowerCase().includes("pending verification") ? (
@@ -291,7 +411,7 @@ export function LoginForm() {
       ) : null}
 
       {step === "credentials" ? (
-        <AuthVirginForm key={virginFormKey} onSubmit={onCredentials} className="space-y-3">
+        <AuthVirginForm key={virginFormKey} onSubmit={onCredentials} className="space-y-4">
           <AuthField
             label={ta("auth_email")}
             type="email"
@@ -312,6 +432,7 @@ export function LoginForm() {
           {mode === "admin" ? (
             <AuthField
               label={ta("auth_master_key")}
+              type="password"
               name={AUTH_INPUT_NAMES.masterKey}
               value={masterKey}
               onChange={setMasterKey}
@@ -321,14 +442,25 @@ export function LoginForm() {
           ) : null}
 
           {(mode === "user" || mode === "admin") && (
-            <div className={`flex justify-end pt-1 ${authTypography.line2}`}>
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-white/80">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded-sm border-white/40 accent-white"
+                />
+                {ta("auth_remember_me")}
+              </label>
               <AuthLink href={forgotHref}>{ta("auth_forgot_password_link")}</AuthLink>
             </div>
           )}
 
-          <AuthPrimaryButton disabled={loading}>{loading ? "..." : ta("auth_login")}</AuthPrimaryButton>
+          <div className="pt-2">
+            <AuthPrimaryButton disabled={loading}>{loading ? "..." : ta("auth_login")}</AuthPrimaryButton>
+          </div>
         </AuthVirginForm>
-      ) : step !== "session_key" ? (
+      ) : step === "mfa" ? (
         <AuthVirginForm key={`${virginFormKey}-mfa`} onSubmit={onMfa} className="space-y-3">
           <OtpDeliveryBanner
             emailMasked={emailMasked}
@@ -355,6 +487,7 @@ export function LoginForm() {
             />
           ) : null}
           <AuthPrimaryButton disabled={loading}>{loading ? "..." : ta("auth_verify")}</AuthPrimaryButton>
+          <OtpResendCountdown seconds={resendAfterSeconds} disabled={loading} onResend={() => void onResendMfa()} />
           <AuthSecondaryButton onClick={resetAll}>{ta("auth_restart")}</AuthSecondaryButton>
         </AuthVirginForm>
       ) : null}

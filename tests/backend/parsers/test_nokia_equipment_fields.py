@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from config.settings import RAW_DATA_PATH
 from src.parsers.parsed_values import MISSING_VALUE
 from src.parsers.nokia_parser import (
     build_equipment_class_counter,
@@ -12,7 +13,7 @@ from src.parsers.nokia_parser import (
     parse_xml_file,
 )
 
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "equipment_seven_types_sample.xml"
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "equipment_seven_types_sample.xml"
 
 
 def test_retu_maps_ant_model_to_product_code():
@@ -98,11 +99,15 @@ def test_smod_r_runtime_fields():
 
 
 def test_runtime_product_code_overrides_planned():
-    xml_path = Path(r"C:/projects/DATA.XML/2026.05.14/MRBTS12012.xml")
+    xml_path = RAW_DATA_PATH / "2026.05.14" / "MRBTS12012.xml"
     if not xml_path.exists():
         return
 
-    result = parse_xml_file(xml_path, forced_snapshot_date="2026-05-14")
+    result = parse_xml_file(
+        xml_path,
+        forced_snapshot_date="2026-05-14",
+        source_root=RAW_DATA_PATH,
+    )
     final = build_final_equipment_inventory(pd.DataFrame(result["equipment"]))
     bbmod3 = final[(final.object_type == "BBMOD") & (final.id == "BBMOD-3")]
     assert len(bbmod3) == 1

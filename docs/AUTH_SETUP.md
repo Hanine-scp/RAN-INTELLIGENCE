@@ -15,47 +15,55 @@ This guide covers the **classic JWT authentication flow** integrated with the ex
 
 Legacy MFA endpoints (`/auth/signup`, `/auth/login/user`, etc.) remain available for the enterprise invite flow.
 
-## Mailtrap setup (development)
+## Mailtrap setup
 
-1. Create a free account at [mailtrap.io](https://mailtrap.io).
-2. Open **Email Testing → Inboxes → your inbox → SMTP Settings**.
-3. Choose **Integrations → Python** (or any SMTP client) and copy credentials.
-4. Add them to `.env.auth` at the project root (see below).
-5. Set `AUTH_NOTIFICATIONS_ENABLED=true`.
-6. Restart the API after changing env vars.
+### Mode test (sandbox — emails capturés dans l'inbox Mailtrap)
 
-Mailtrap captures all outgoing mail in the inbox UI — nothing is delivered to real recipients.
+1. [mailtrap.io](https://mailtrap.io) → **Email Testing → Inboxes → SMTP Settings**
+2. Copier user/password dans `.env.auth`
+
+### Mode réel (Live SMTP — emails livrés)
+
+1. **Email Sending → Sending Domains** → vérifier un domaine
+2. **Integrations → SMTP** : `live.smtp.mailtrap.io`, port `587`, user `api`
+3. **Settings → API Tokens** → token Admin → `MAILTRAP_API_TOKEN` et `SMTP_PASS`
+
+Voir aussi `docs/AUTH_NOTIFICATIONS_SETUP.md` pour Twilio Verify (SMS OTP).
 
 ## Required environment variables
 
-Create or update `.env.auth`:
+Create or update `.env.auth` (same structure as `.env.auth.example`):
 
 ```env
-# JWT (use a long random string in production)
+AUTH_JWT_SECRET=replace-with-long-random-string
+AUTH_DEV_MODE=false
+AUTH_NOTIFICATIONS_ENABLED=true
+AUTH_OTP_MINUTES=10
+
+APP_FRONTEND_URL=http://localhost:3000
+APP_WEBOTP_DOMAIN=localhost
+
+# Mailtrap Live SMTP (OTP email)
+MAILTRAP_API_TOKEN=mt_votre_token
+SMTP_HOST=live.smtp.mailtrap.io
+SMTP_PORT=587
+SMTP_USER=api
+SMTP_PASS=mt_votre_token
+SMTP_FROM=RAN Intelligence <noreply@votre-domaine-verifie.com>
+SMTP_USE_TLS=true
+
+# Twilio Verify (OTP SMS)
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_VERIFY_SERVICE_SID=VAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Optional JWT aliases
 JWT_SECRET=replace-with-64-char-random-string
 JWT_EXPIRES_IN=30m
-# Aliases also supported: AUTH_JWT_SECRET, AUTH_ACCESS_TOKEN_MINUTES
-
-# Token lifetimes for email links
 AUTH_EMAIL_VERIFY_HOURS=24
 AUTH_PASSWORD_RESET_HOURS=1
 
-# Frontend base URL (used in verification / reset links)
-APP_FRONTEND_URL=http://localhost:3000
-
-# Enable outbound email
-AUTH_NOTIFICATIONS_ENABLED=true
-AUTH_DEV_MODE=true
-
-# Mailtrap SMTP
-SMTP_HOST=sandbox.smtp.mailtrap.io
-SMTP_PORT=2525
-SMTP_USER=your_mailtrap_username
-SMTP_PASS=your_mailtrap_password
-SMTP_FROM=RAN Intelligence <no-reply@ran.local>
-SMTP_USE_TLS=true
-
-# Database (SQLite default)
+# Database (SQLite default if AUTH_DATABASE_URL unset)
 AUTH_DB_PATH=data/auth/platform_auth.db
 ```
 
@@ -150,7 +158,7 @@ Response `200`:
     "refresh_token": "...",
     "token_type": "bearer",
     "expires_in": 1800,
-    "user": { "id": 2, "email": "analyst@ooredoo.ran", "role": "user" }
+    "user": { "id": 2, "email": "analyst@ooredoo.ran", "role": "responsable" }
   }
 }
 ```
@@ -194,7 +202,7 @@ Content-Type: application/json
 6. **Forgot password** — `/forgot-password`, check Mailtrap for reset link.
 7. **Reset** — `/reset-password?token=...`, then login with new password.
 
-When SMTP is disabled, set `AUTH_DEV_MODE=true` — the API returns `dev_verify_token` / `dev_reset_token` in responses for local testing.
+When SMTP/Twilio are disabled, set `AUTH_DEV_MODE=true` — the API may return OTP hints in responses for local testing only.
 
 ## Files (classic JWT auth)
 

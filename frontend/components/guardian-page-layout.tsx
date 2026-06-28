@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { GuardianSearchPanel } from "@/components/guardian-search-panel";
 import { GuardianAiReportSection } from "@/components/guardian-ai-report-section";
 import { AnomaliesSection } from "@/components/anomalies-section";
 import { GuardianChangementsSection } from "@/components/guardian-changements-section";
@@ -33,7 +32,7 @@ function resolveGuardianTab(value: string | null): GuardianHubTab {
 }
 
 function GuardianPageLayoutInner() {
-  const { filters, payload } = useAppContext();
+  const { filters } = useAppContext();
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -61,8 +60,6 @@ function GuardianPageLayoutInner() {
 
   return (
     <div className="space-y-4">
-      <GuardianSearchPanel language={filters.language} payload={payload} />
-
       <GuardianDataHubTabs language={filters.language} activeTab={activeTab} onTabChange={selectTab} />
 
       <GuardianAiReportSection activeTab={activeTab} showEvolutionsPanel={showEvolutionsPanel} />

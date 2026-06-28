@@ -71,29 +71,27 @@ export function AuthPhoneField({
     update(r.code, local);
   };
 
+  const labelClass = isCard
+    ? "mb-1.5 block text-sm font-semibold text-slate-700"
+    : "mb-1.5 block text-sm font-semibold text-white/90";
+
+  const shellClass = isCard
+    ? `flex h-12 items-center overflow-hidden rounded-xl border bg-white shadow-sm transition focus-within:border-[#b51218] focus-within:ring-4 focus-within:ring-[#b51218]/10 ${
+        complete ? "border-emerald-400" : "border-slate-200"
+      }`
+    : `flex h-12 items-center overflow-hidden rounded-xl border bg-white/95 shadow-[0_4px_16px_rgba(0,0,0,0.14)] transition focus-within:border-white focus-within:ring-4 focus-within:ring-white/25 ${
+        complete ? "border-emerald-400" : "border-white/50"
+      }`;
+
   return (
     <div ref={rootRef} className="block">
-      <span className="sr-only">{label}</span>
-      <div
-        className={
-          isCard
-            ? `flex h-11 items-center overflow-hidden border-0 border-b transition focus-within:border-[#b51218] ${
-                complete ? "border-emerald-400" : "border-slate-200"
-              }`
-            : `flex h-11 items-center overflow-hidden rounded-md border bg-white/15 backdrop-blur-sm transition focus-within:border-white/55 focus-within:bg-white/22 focus-within:ring-2 focus-within:ring-white/10 ${
-                complete ? "border-emerald-300/40" : "border-white/30"
-              }`
-        }
-      >
+      <span className={labelClass}>{label}</span>
+      <div className={shellClass}>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-label={`Pays : ${region.name}`}
-          className={
-            isCard
-              ? "flex h-full shrink-0 items-center gap-2 border-r border-slate-200 px-2 text-slate-700 transition hover:bg-slate-50 sm:px-3"
-              : "flex h-full shrink-0 items-center gap-2 border-r border-white/20 px-3 text-white transition hover:bg-white/10"
-          }
+          className="flex h-full shrink-0 items-center gap-2 border-r border-slate-200 px-2 text-slate-700 transition hover:bg-slate-50 sm:px-3"
         >
           <img
             src={flagImageUrl(region.code)}
@@ -103,7 +101,7 @@ export function AuthPhoneField({
             className="h-4 w-[22px] shrink-0 rounded-[2px] object-cover shadow-sm"
           />
           <span className="max-w-[92px] truncate text-xs font-medium">{region.name}</span>
-          <svg viewBox="0 0 24 24" className={`h-3 w-3 shrink-0 fill-current text-white/60 ${open ? "rotate-180" : ""}`}>
+          <svg viewBox="0 0 24 24" className={`h-3 w-3 shrink-0 fill-current text-slate-400 ${open ? "rotate-180" : ""}`}>
             <path d="M7 10l5 5 5-5H7Z" />
           </svg>
         </button>
@@ -123,14 +121,10 @@ export function AuthPhoneField({
           data-form-type="other"
           aria-label={label}
           {...virginProps}
-          className={
-            isCard
-              ? "min-w-0 flex-1 bg-transparent px-2 text-sm tracking-widest text-slate-800 outline-none placeholder:tracking-[0.2em] placeholder:text-slate-400 sm:px-3"
-              : "min-w-0 flex-1 bg-transparent px-3 text-sm tracking-widest text-white outline-none placeholder:tracking-[0.2em] placeholder:text-white/35"
-          }
+          className="min-w-0 flex-1 bg-transparent px-2 text-sm tracking-widest text-slate-800 outline-none placeholder:tracking-[0.2em] placeholder:text-slate-400 sm:px-3"
         />
 
-        <span className={`shrink-0 border-l px-2 text-[10px] sm:px-3 ${isCard ? "border-slate-200 text-slate-400" : "border-white/15 text-white/45"}`}>
+        <span className="shrink-0 border-l border-slate-200 px-2 text-[10px] text-slate-400 sm:px-3">
           {region.digits} chiffres
         </span>
       </div>
@@ -245,22 +239,24 @@ export function AuthPasswordField({
   const { virginProps } = useVirginInput();
   const isCard = useAuthFormTheme() === "card";
 
+  const labelClass = isCard
+    ? "mb-1.5 block text-sm font-semibold text-slate-700"
+    : "mb-1.5 block text-sm font-semibold text-white/90";
+
   const shellClass = isCard
-    ? "flex h-11 items-center overflow-hidden border-0 border-b border-slate-200 transition focus-within:border-[#b51218]"
-    : "flex h-11 items-center overflow-hidden rounded-md border border-white/30 bg-white/15 backdrop-blur-sm transition focus-within:border-white/55 focus-within:bg-white/22 focus-within:ring-2 focus-within:ring-white/10";
+    ? "flex h-12 items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition focus-within:border-[#b51218] focus-within:ring-4 focus-within:ring-[#b51218]/10"
+    : "flex h-12 items-center overflow-hidden rounded-xl border border-white/50 bg-white/95 shadow-[0_4px_16px_rgba(0,0,0,0.14)] transition focus-within:border-white focus-within:ring-4 focus-within:ring-white/25";
 
-  const iconClass = isCard ? "text-slate-400" : "text-white/75";
-  const inputClass = isCard
-    ? "min-w-0 flex-1 border-0 bg-transparent px-2 text-sm text-slate-800 outline-none placeholder:text-slate-400"
-    : "min-w-0 flex-1 border-0 bg-transparent px-2 text-sm text-white outline-none placeholder:text-white/45";
+  const iconClass = "text-slate-400";
+  const inputClass =
+    "min-w-0 flex-1 border-0 bg-transparent px-2 text-sm text-slate-900 outline-none placeholder:text-slate-400";
 
-  const toggleClass = isCard
-    ? "flex h-full w-9 shrink-0 items-center justify-center text-slate-400 transition hover:text-slate-600"
-    : "flex h-full w-9 shrink-0 items-center justify-center text-white/50 transition hover:text-white";
+  const toggleClass =
+    "flex h-full w-9 shrink-0 items-center justify-center text-slate-400 transition hover:text-slate-600";
 
   return (
     <div className="block">
-      <span className="sr-only">{label}</span>
+      <span className={labelClass}>{label}</span>
       <div className={shellClass}>
         <span className={`flex h-full w-10 shrink-0 items-center justify-center ${iconClass}`} aria-hidden>
           <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current">

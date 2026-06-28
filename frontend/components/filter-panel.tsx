@@ -2,22 +2,24 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { deleteSnapshots, getFilterOptions, processSnapshots } from "@/lib/api";
+import { deleteSnapshots, processSnapshots } from "@/lib/api";
 import { t } from "@/lib/i18n";
+import { useFilterOptions, type FilterOptionsData } from "@/lib/use-filter-options";
 import { useAppContext } from "@/components/app-provider";
 import { useAuth } from "@/components/auth-provider";
 import { isAdmin } from "@/lib/auth";
 import { CHART_PRIMARY } from "@/lib/chart-theme";
 
-type OptionData = {
-  date_options: string[];
-  file_options: { snapshot_date: string; source_file: string }[];
-  site_options: { snapshot_date: string; source_file: string; site_id: string; site_name: string }[];
-  total_sites: number;
-  total_xml: number;
-  processed_dates?: string[];
-  xml_snapshots?: { snapshot_date: string; folder_name: string; xml_count: number; processed_in_lake: boolean }[];
-  lake_ready?: boolean;
+type OptionData = FilterOptionsData;
+
+const EMPTY_FILTER_OPTIONS: OptionData = {
+  date_options: [],
+  file_options: [],
+  site_options: [],
+  total_sites: 0,
+  total_xml: 0,
+  processed_dates: [],
+  xml_snapshots: [],
 };
 
 type CheckboxOption = {
@@ -126,16 +128,6 @@ export function FilterPanel() {
   const canManageData = isAdmin(user);
   const inputClass =
     "mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
-  const [options, setOptions] = useState<OptionData>({
-    date_options: [],
-    file_options: [],
-    site_options: [],
-    total_sites: 0,
-    total_xml: 0,
-    processed_dates: [],
-    xml_snapshots: [],
-  });
-  const [loading, setLoading] = useState(false);
   const [processingSnapshots, setProcessingSnapshots] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [dateQuery, setDateQuery] = useState("");
@@ -151,21 +143,23 @@ export function FilterPanel() {
   const [footerStatusOpen, setFooterStatusOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
+  const {
+    data: filterOptions,
+    error: filterOptionsError,
+    isLoading: filterOptionsLoading,
+  } = useFilterOptions(payload, optionsRefreshKey);
+  const options = filterOptions ?? EMPTY_FILTER_OPTIONS;
+  const loading = filterOptionsLoading && !filterOptions;
+
   useEffect(() => {
-    const run = async () => {
-      setLoading(true);
-      try {
-        const data = await getFilterOptions(payload);
-        setOptions(data);
-        setErrorMessage("");
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Failed to load filters.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    void run();
-  }, [payload, setFilters, optionsRefreshKey]);
+    if (filterOptionsError) {
+      setErrorMessage(
+        filterOptionsError instanceof Error ? filterOptionsError.message : "Failed to load filters.",
+      );
+    } else if (filterOptions) {
+      setErrorMessage("");
+    }
+  }, [filterOptions, filterOptionsError]);
 
   const handleDeleteSnapshots = async () => {
     if (!filters.selected_dates.length) {

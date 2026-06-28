@@ -326,6 +326,13 @@ export function DeltaUnifiedPage({ title, subtitle, embedded = false }: DeltaUni
 
   const body = (
     <>
+      <DeltaAiReportSection
+        referenceDate={effectiveDate1}
+        comparisonDate={effectiveDate2}
+        isReady={isReadyToCompare && !loading}
+        compare={compare}
+      />
+
       <section className="rounded-2xl border border-red-100 bg-gradient-to-r from-white to-red-50/50 p-4 shadow-[0_10px_28px_rgba(220,38,38,0.08)]">
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm font-semibold text-slate-800">Periode de comparaison</p>
@@ -367,13 +374,6 @@ export function DeltaUnifiedPage({ title, subtitle, embedded = false }: DeltaUni
         </div>
       </section>
 
-      <DeltaAiReportSection
-        referenceDate={effectiveDate1}
-        comparisonDate={effectiveDate2}
-        isReady={isReadyToCompare && !loading}
-        compare={compare}
-      />
-
       {!hasSelection ? (
         <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">Aucune donnée. Sélectionnez un snapshot pour commencer.</p>
       ) : !isReadyToCompare ? (
@@ -411,7 +411,7 @@ export function DeltaUnifiedPage({ title, subtitle, embedded = false }: DeltaUni
                   height={170}
                   framed={false}
                   forceDualAxis
-                  bars={[{ key: "ancien", color: DELTA_COLORS.afterLight }, { key: "nouveau", color: DELTA_COLORS.after }]}
+                  bars={[{ key: "ancien", color: DELTA_COLORS.before }, { key: "nouveau", color: DELTA_COLORS.after }]}
                 />
                 <p className="mt-2 rounded-lg border border-rose-100 bg-rose-50/40 p-2 text-sm font-semibold text-slate-700">
                   Delta sites: {sitesComparison.delta >= 0 ? "+" : ""}
