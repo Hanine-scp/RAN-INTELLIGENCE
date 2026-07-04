@@ -18,6 +18,7 @@ METRIC_CATALOG: list[dict[str, Any]] = [
     {"metric": "active_sites", "metric_label": "Sites actifs", "metric_group": "sites", "sort_order": 40, "format": "#,0"},
     {"metric": "blocked_sites", "metric_label": "Sites bloqués", "metric_group": "sites", "sort_order": 50, "format": "#,0"},
     {"metric": "total_equipment", "metric_label": "Total équipements", "metric_group": "equipment", "sort_order": 60, "format": "#,0"},
+    {"metric": "serial_rows", "metric_label": "Serial numbers (Total)", "metric_group": "equipment", "sort_order": 65, "format": "#,0"},
     {"metric": "unique_serials", "metric_label": "Serials uniques", "metric_group": "equipment", "sort_order": 70, "format": "#,0"},
     {"metric": "missing_serials", "metric_label": "Serials manquants", "metric_group": "equipment", "sort_order": 80, "format": "#,0"},
     {"metric": "cells_2g", "metric_label": "Cellules 2G", "metric_group": "cells", "sort_order": 90, "format": "#,0"},
@@ -54,8 +55,9 @@ def _atomic_csv_write(df: pd.DataFrame, destination: Path) -> None:
     tmp.replace(destination)
 
 
-def _load_csv(export_dir: Path, name: str) -> pd.DataFrame:
-    path = export_dir / name
+def _load_csv(export_dir: Path, name: str, *, subfolder: str = "") -> pd.DataFrame:
+    base = export_dir / subfolder if subfolder else export_dir
+    path = base / name
     if not path.exists():
         return pd.DataFrame()
     return pd.read_csv(path, dtype=str, keep_default_na=False)
@@ -170,8 +172,8 @@ def _build_fact_technology(summary: pd.DataFrame, valid_dates: list[str]) -> pd.
     return pd.DataFrame(rows)
 
 
-def _build_fact_equipment_by_type(export_dir: Path, valid_dates: list[str]) -> pd.DataFrame:
-    counter = _load_csv(export_dir, "equipment_class_counter.csv")
+def _build_fact_equipment_by_type(export_dir: Path, valid_dates: list[str], *, subfolder: str = "") -> pd.DataFrame:
+    counter = _load_csv(export_dir, "equipment_class_counter.csv", subfolder=subfolder)
     if counter.empty:
         return pd.DataFrame()
     frame = counter[counter["snapshot_date"].astype(str).isin(valid_dates)].copy()

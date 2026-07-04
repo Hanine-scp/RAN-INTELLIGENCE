@@ -16,12 +16,13 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.access_middleware import AccessControlMiddleware
-from api.activity_middleware import PlatformActivityMiddleware
-from api.performance_middleware import PerformanceMiddleware
+from api.cache_helpers import cache_ttl, cached_call, invalidate_all_data_cache
+from api.middleware.access import AccessControlMiddleware
+from api.middleware.activity import PlatformActivityMiddleware
+from api.middleware.performance import PerformanceMiddleware
 from api.rate_limit import rate_limiter
-from api.auth_routes import router as auth_router
-from api.integration_routes import router as integration_router
+from api.routes.auth import router as auth_router
+from api.routes.integration import router as integration_router
 from api.dependencies import get_current_user, require_admin
 from src.services.auth_service import AuthUser, auth_service
 from api.schemas import (
@@ -215,8 +216,7 @@ async def ingest_xml(
         except Exception as exc:
             processing_error = str(exc)
 
-    cache_service.invalidate_prefix("ran:dashboard:")
-    cache_service.invalidate_prefix("ran:filters_options:")
+    invalidate_all_data_cache()
     return {
         "data": {
             "snapshot_date": validated_date,
@@ -243,8 +243,7 @@ async def remove_snapshots(payload: DeleteSnapshotsPayload, _: AuthUser = Depend
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    cache_service.invalidate_prefix("ran:dashboard:")
-    cache_service.invalidate_prefix("ran:filters_options:")
+    invalidate_all_data_cache()
     return {"data": result}
 
 
@@ -272,6 +271,8 @@ async def process_snapshots(payload: ProcessSnapshotsPayload, _: AuthUser = Depe
             errors.append({"snapshot_date": snapshot_date, "error": str(exc)})
     if not processed and errors:
         raise HTTPException(status_code=400, detail=errors)
+    if processed:
+        invalidate_all_data_cache()
     return {"data": {"processed": processed, "errors": errors}}
 
 
@@ -310,30 +311,43 @@ async def dashboard(payload: FilterPayload, user: AuthUser = Depends(get_current
 
 @app.post("/sites")
 async def sites(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    data = await _sync_in_thread(data_service.get_sites_page, _ctx(payload, user))
+    ctx = _ctx(payload, user)
+    ttl = cache_ttl("CACHE_SITES_TTL_SECONDS", 90)
+    data = await cached_call("sites", ctx, lambda: data_service.get_sites_page(ctx), ttl=ttl)
     return {"data": data}
 
 
 @app.post("/v2/sites")
 async def sites_v2(payload: PaginatedPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    data = await _sync_in_thread(
-        data_service.get_sites_page_v2,
-        _ctx(payload, user),
-        page=payload.page,
-        page_size=payload.page_size,
-        search=payload.search,
-    )
+    ctx = _ctx(payload, user)
+    extra = {"page": payload.page, "page_size": payload.page_size, "search": (payload.search or "").strip()}
+    ttl = cache_ttl("CACHE_SITES_TTL_SECONDS", 90)
+
+    def producer():
+        return data_service.get_sites_page_v2(
+            ctx,
+            page=payload.page,
+            page_size=payload.page_size,
+            search=payload.search,
+        )
+
+    data = await cached_call("sites_v2", ctx, producer, extra=extra, ttl=ttl)
     return {"data": data}
 
 
 @app.post("/inventory")
-def inventory(payload: InventoryPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {
-        "data": data_service.get_inventory_page(
-            _ctx(payload, user),
-            payload.object_types,
-        )
-    }
+async def inventory(payload: InventoryPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    extra = {"object_types": sorted(payload.object_types or [])}
+    ttl = cache_ttl("CACHE_INVENTORY_TTL_SECONDS", 90)
+    data = await cached_call(
+        "inventory",
+        ctx,
+        lambda: data_service.get_inventory_page(ctx, payload.object_types),
+        extra=extra,
+        ttl=ttl,
+    )
+    return {"data": data}
 
 
 @app.post("/v2/inventory")
@@ -355,23 +369,42 @@ def delta(user: AuthUser = Depends(get_current_user)) -> dict:
 
 
 @app.post("/delta/compare")
-def delta_compare(payload: DeltaComparePayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_delta_comparison(_ctx(payload, user), payload.compare_date_1, payload.compare_date_2)}
+async def delta_compare(payload: DeltaComparePayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    extra = {"date_1": payload.compare_date_1, "date_2": payload.compare_date_2}
+    ttl = cache_ttl("CACHE_DELTA_TTL_SECONDS", 120)
+    data = await cached_call(
+        "delta_compare",
+        ctx,
+        lambda: data_service.get_delta_comparison(ctx, payload.compare_date_1, payload.compare_date_2),
+        extra=extra,
+        ttl=ttl,
+    )
+    return {"data": data}
 
 
 @app.post("/statistics")
-def statistics(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_statistics_page(_ctx(payload, user))}
+async def statistics(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    ttl = cache_ttl("CACHE_ANALYTICS_TTL_SECONDS", 120)
+    data = await cached_call("statistics", ctx, lambda: data_service.get_statistics_page(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/prediction")
-def prediction(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_prediction_page(_ctx(payload, user))}
+async def prediction(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    ttl = cache_ttl("CACHE_ANALYTICS_TTL_SECONDS", 120)
+    data = await cached_call("prediction", ctx, lambda: data_service.get_prediction_page(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/analytics")
-def analytics(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_analytics_page(_ctx(payload, user))}
+async def analytics(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    ttl = cache_ttl("CACHE_ANALYTICS_TTL_SECONDS", 120)
+    data = await cached_call("analytics", ctx, lambda: data_service.get_analytics_page(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/temporal-changes")
@@ -414,13 +447,19 @@ def asset_product_codes_v2(payload: AssetDistributionV2Payload, user: AuthUser =
 
 
 @app.post("/global-counters")
-def global_counters(payload: FilterPayload, user: AuthUser = Depends(require_admin)) -> dict:
-    return {"data": data_service.get_global_counters_page(_ctx(payload, user))}
+async def global_counters(payload: FilterPayload, user: AuthUser = Depends(require_admin)) -> dict:
+    ctx = _ctx(payload, user)
+    ttl = cache_ttl("CACHE_ANALYTICS_TTL_SECONDS", 120)
+    data = await cached_call("global_counters", ctx, lambda: data_service.get_global_counters_page(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/quality")
-def quality(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_quality_page(_ctx(payload, user))}
+async def quality(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    ttl = cache_ttl("CACHE_QUALITY_TTL_SECONDS", 120)
+    data = await cached_call("quality", ctx, lambda: data_service.get_quality_page(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/investigate/site")
@@ -697,8 +736,18 @@ async def assistant_insight_with_files(
 
 
 @app.post("/anomalies")
-def anomalies(payload: AnomalyPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": data_service.get_anomaly_alerts(_ctx(payload, user), replacement_threshold=payload.replacement_threshold)}
+async def anomalies(payload: AnomalyPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    extra = {"replacement_threshold": payload.replacement_threshold}
+    ttl = cache_ttl("CACHE_ANALYTICS_TTL_SECONDS", 120)
+    data = await cached_call(
+        "anomalies",
+        ctx,
+        lambda: data_service.get_anomaly_alerts(ctx, replacement_threshold=payload.replacement_threshold),
+        extra=extra,
+        ttl=ttl,
+    )
+    return {"data": data}
 
 
 @app.post("/ai-report")
@@ -791,8 +840,11 @@ def trust_verify(payload: TrustSnapshotPayload, user: AuthUser = Depends(get_cur
 
 
 @app.post("/guardian/overview")
-def guardian_overview(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": guardian_orchestrator.get_guardian_overview(_ctx(payload, user))}
+async def guardian_overview(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+    ctx = _ctx(payload, user)
+    ttl = cache_ttl("CACHE_GUARDIAN_TTL_SECONDS", 120)
+    data = await cached_call("guardian_overview", ctx, lambda: guardian_orchestrator.get_guardian_overview(ctx), ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/guardian/integrity")
@@ -817,21 +869,41 @@ def guardian_changes(payload: DeltaComparePayload, user: AuthUser = Depends(get_
 
 
 @app.post("/guardian/anomalies")
-def guardian_anomalies(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+async def guardian_anomalies(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     ctx = _ctx(payload, user)
-    dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
-    target = dates[-1] if dates else None
-    rows = anomaly_intelligence_service.detect_anomalies(ctx, snapshot_date=target, persist=True) if target else []
-    return {"data": {"snapshot_date": target, "count": len(rows), "rows": rows[:100]}}
+    ttl = cache_ttl("CACHE_GUARDIAN_TTL_SECONDS", 120)
+
+    def producer() -> dict:
+        dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
+        target = dates[-1] if dates else None
+        if not target:
+            return {"snapshot_date": None, "count": 0, "rows": []}
+        rows = anomaly_intelligence_service.get_anomalies(snapshot_date=target, vendor=ctx.vendor, limit=100)
+        if not rows:
+            rows = anomaly_intelligence_service.detect_anomalies(ctx, snapshot_date=target, persist=True)[:100]
+        return {"snapshot_date": target, "count": len(rows), "rows": rows[:100]}
+
+    data = await cached_call("guardian_anomalies", ctx, producer, ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/guardian/risks")
-def guardian_risks(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
+async def guardian_risks(payload: FilterPayload, user: AuthUser = Depends(get_current_user)) -> dict:
     ctx = _ctx(payload, user)
-    dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
-    target = dates[-1] if dates else None
-    rows = predictive_risk_service.compute_risk_predictions(ctx, snapshot_date=target, persist=True) if target else []
-    return {"data": {"snapshot_date": target, "count": len(rows), "rows": rows[:50]}}
+    ttl = cache_ttl("CACHE_GUARDIAN_TTL_SECONDS", 120)
+
+    def producer() -> dict:
+        dates = sorted(ctx.effective_dates or ctx.selected_dates or [])
+        target = dates[-1] if dates else None
+        if not target:
+            return {"snapshot_date": None, "count": 0, "rows": []}
+        rows = predictive_risk_service.get_risk_predictions(snapshot_date=target, vendor=ctx.vendor, limit=50)
+        if not rows:
+            rows = predictive_risk_service.compute_risk_predictions(ctx, snapshot_date=target, persist=True)[:50]
+        return {"snapshot_date": target, "count": len(rows), "rows": rows[:50]}
+
+    data = await cached_call("guardian_risks", ctx, producer, ttl=ttl)
+    return {"data": data}
 
 
 @app.post("/guardian/run")

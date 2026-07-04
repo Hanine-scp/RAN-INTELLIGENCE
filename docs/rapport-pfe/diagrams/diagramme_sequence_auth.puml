@@ -1,0 +1,112 @@
+@startuml diagramme_sequence_auth
+' ============================================================
+'  RAN INTELLIGENCE - Diagramme de sequence (objets)
+'  Scenario : Connexion d'un responsable avec MFA (email + SMS)
+'  Fidele a AuthService.login_user_step1 / login_user_step2
+' ============================================================
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 12
+skinparam sequenceMessageAlign center
+skinparam ParticipantBorderColor #2B3A55
+skinparam ParticipantBackgroundColor #EEF3FB
+skinparam ActorBorderColor #2B3A55
+skinparam SequenceLifeLineBorderColor #94A3B8
+skinparam noteBackgroundColor #FFF9EC
+skinparam noteBorderColor #E0C36A
+
+actor "Responsable" as U
+participant ":WebApp\n(Next.js)" as Web
+participant ":AuthRouter\n(FastAPI)" as API
+participant ":AuthService" as Svc
+participant ":AuthDatabase\n(SQLite/Postgres)" as DB
+participant ":NotificationService" as Notif
+participant "Email / SMS\n(SMTP, Twilio)" as Ext
+
+== Etape 1 : identification (email + mot de passe) ==
+U -> Web : saisit email + mot de passe
+activate Web
+Web -> API : POST /auth/login/user
+activate API
+API -> Svc : login_user_step1(email, password)
+activate Svc
+
+Svc -> DB : SELECT users WHERE email AND role='responsable'
+activate DB
+DB --> Svc : row utilisateur
+deactivate DB
+
+Svc -> Svc : _authenticate_password()\n(verif bcrypt + anti brute-force)
+
+alt identifiants invalides
+  Svc --> API : ValueError("Invalid credentials")
+  API --> Web : 401 Unauthorized
+  Web --> U : message d'erreur
+else identifiants valides
+  Svc -> DB : INSERT otp_codes (email, phone)\npurpose = login_mfa
+  activate DB
+  DB --> Svc : OTP enregistres (hash SHA-256)
+  deactivate DB
+
+  Svc -> Notif : deliver_otp(email)
+  activate Notif
+  Notif -> Ext : envoi code email
+  Notif --> Svc : email_sent
+  deactivate Notif
+
+  Svc -> Notif : deliver_otp(SMS)
+  activate Notif
+  Notif -> Ext : envoi code SMS
+  Notif --> Svc : sms_sent
+  deactivate Notif
+
+  Svc --> API : { user_id, mfa_required=true, channels }
+  deactivate Svc
+  API --> Web : 200 { mfa_required, verification }
+  deactivate API
+  Web --> U : affiche l'ecran de saisie OTP
+  deactivate Web
+end
+
+== Etape 2 : validation du second facteur (OTP) ==
+U -> Web : saisit code email + code SMS
+activate Web
+Web -> API : POST /auth/login/user/mfa
+activate API
+API -> Svc : login_user_step2(user_id, email_code, phone_code)
+activate Svc
+
+Svc -> DB : SELECT otp_codes (non consommes, non expires)
+activate DB
+DB --> Svc : codes attendus
+deactivate DB
+Svc -> Svc : _verify_otp(email) + _verify_otp(phone)
+
+alt OTP invalide ou expire
+  Svc --> API : ValueError("Invalid/expired code")
+  API --> Web : 400 Bad Request
+  Web --> U : code invalide
+else OTP valides
+  Svc -> DB : UPDATE otp_codes SET consumed_at
+  Svc -> Svc : _rotate_personal_access_key()
+  Svc -> DB : INSERT refresh_tokens (hash)
+  activate DB
+  DB --> Svc : session persistee
+  deactivate DB
+  Svc -> Svc : _issue_tokens()\n(JWT access + refresh)
+  Svc -> DB : INSERT auth_audit (login_user_mfa)
+  Svc --> API : { access_token, refresh_token, user }
+  deactivate Svc
+  API --> Web : 200 { tokens, profil }
+  deactivate API
+  Web --> U : redirection vers le tableau de bord
+  deactivate Web
+end
+
+note over Svc, DB
+  Tous les secrets (OTP, cles d'acces,
+  refresh tokens) sont stockes haches
+  en SHA-256 ; les mots de passe en bcrypt.
+end note
+
+@enduml

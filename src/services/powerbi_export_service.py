@@ -10,36 +10,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.services.powerbi_premium_builder import PREMIUM_DATASETS, build_premium_exports
+from src.services.powerbi_decision_builder import build_decision_exports
+from src.services.powerbi_layout import RAW_DATASETS, RAW_DIR, ensure_folders, list_export_files
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_PROCESSED = _REPO_ROOT / "data" / "processed"
 _DEFAULT_EXPORT = _REPO_ROOT / "data" / "exports" / "powerbi"
-
-POWERBI_DATASETS = (
-    "site_status.csv",
-    "equipment_inventory.csv",
-    "snapshot_summary.csv",
-    "delta_metrics.csv",
-    "delta_site_details.csv",
-    "site_change_report.csv",
-    "equipment_completeness_report.csv",
-    "equipment_class_counter.csv",
-)
-
-PLATFORM_DATASETS = (
-    "platform_snapshot_dates.csv",
-    "platform_delta_comparison.csv",
-    "platform_delta_site_details.csv",
-    "platform_delta_equipment_changes.csv",
-)
 
 _COPY_RETRIES = 3
 _COPY_RETRY_DELAY_S = 0.4
 
 
 def _atomic_copy(source: Path, destination: Path) -> None:
-    """Copy via temp file; survives partial locks better than direct copy2 on Windows."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_suffix(destination.suffix + ".tmp")
     shutil.copy2(source, tmp)
@@ -56,7 +38,7 @@ class PowerBiExportService:
         if not source.exists():
             return "missing", None
 
-        destination = self.export_dir / name
+        destination = self.export_dir / RAW_DIR / name
         last_error: PermissionError | None = None
 
         for attempt in range(_COPY_RETRIES):
@@ -78,17 +60,21 @@ class PowerBiExportService:
         )
 
     def sync_export(self) -> dict[str, Any]:
-        self.export_dir.mkdir(parents=True, exist_ok=True)
+        ensure_folders(self.export_dir)
 
         copied: list[str] = []
         missing: list[str] = []
         locked: list[str] = []
         warnings: list[str] = []
 
-        for name in POWERBI_DATASETS:
+        for name in RAW_DATASETS:
             status, message = self._copy_dataset(name)
             if status == "copied":
-                copied.append(name)
+                copied.append(f"{RAW_DIR}/{name}")
+                # Remove legacy flat copy at export root
+                legacy = self.export_dir / name
+                if legacy.exists():
+                    legacy.unlink()
             elif status == "missing":
                 missing.append(name)
             else:
@@ -104,43 +90,34 @@ class PowerBiExportService:
         except Exception as exc:
             platform = {"error": str(exc)}
 
-        premium: dict[str, Any] = {}
+        decision: dict[str, Any] = {}
         try:
-            premium = build_premium_exports(self.export_dir)
+            decision = build_decision_exports(self.export_dir, self.processed_dir)
         except Exception as exc:
-            premium = {"error": str(exc)}
+            decision = {"error": str(exc)}
 
-        all_export_names = list(POWERBI_DATASETS) + list(PLATFORM_DATASETS) + list(PREMIUM_DATASETS)
         manifest = {
             "synced_at": datetime.now(timezone.utc).isoformat(),
+            "layout_version": "2.1",
             "source_dir": str(self.processed_dir.resolve()),
             "export_dir": str(self.export_dir.resolve()),
-            "files": self._file_entries(all_export_names),
+            "folders": {
+                "raw": "Copies pipeline (audit)",
+                "dimensions": "Dimensions star-schema",
+                "facts": "Faits KPI, qualité, anomalies, risques",
+                "bridge": "Périodes de comparaison",
+                "model": "Modèle Power BI (relations + pages)",
+            },
+            "files": list_export_files(self.export_dir),
             "copied": copied,
             "missing": missing,
             "locked": locked,
             "warnings": warnings,
             "platform_sync": platform,
-            "premium_build": premium,
+            "decision_build": decision,
         }
         (self.export_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         return manifest
-
-    def _file_entries(self, names: list[str]) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        for name in names:
-            path = self.export_dir / name
-            if not path.exists():
-                continue
-            stat = path.stat()
-            rows.append(
-                {
-                    "name": name,
-                    "size_bytes": stat.st_size,
-                    "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                }
-            )
-        return rows
 
     def status(self) -> dict[str, Any]:
         manifest_path = self.export_dir / "manifest.json"
@@ -151,24 +128,35 @@ class PowerBiExportService:
             except json.JSONDecodeError:
                 manifest = {}
 
-        all_names = list(POWERBI_DATASETS) + list(PLATFORM_DATASETS) + list(PREMIUM_DATASETS)
-        export_files = self._file_entries([name for name in all_names if (self.export_dir / name).exists()])
-        processed_files = self._file_entries(
-            [name for name in POWERBI_DATASETS if (self.processed_dir / name).exists()]
-        )
+        export_files = list_export_files(self.export_dir)
+        processed_files: list[dict[str, Any]] = []
+        for name in RAW_DATASETS:
+            path = self.processed_dir / name
+            if not path.exists():
+                continue
+            stat = path.stat()
+            processed_files.append(
+                {
+                    "name": name,
+                    "folder": "",
+                    "size_bytes": stat.st_size,
+                    "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                }
+            )
 
         return {
             "export_dir": str(self.export_dir.resolve()),
             "processed_dir": str(self.processed_dir.resolve()),
             "export_ready": bool(export_files),
+            "layout_version": manifest.get("layout_version", "2.0"),
             "last_synced_at": manifest.get("synced_at"),
             "export_files": export_files,
             "processed_files": processed_files,
-            "datasets": list(POWERBI_DATASETS),
-            "platform_datasets": list(PLATFORM_DATASETS),
-            "premium_datasets": list(PREMIUM_DATASETS),
+            "folders": manifest.get("folders", {}),
+            "datasets": list(RAW_DATASETS),
             "locked_files": manifest.get("locked", []),
             "export_warnings": manifest.get("warnings", []),
+            "decision_build": manifest.get("decision_build", {}),
             "powerbi_report_url": os.getenv("POWERBI_REPORT_URL", "").strip(),
             "powerbi_embed_url": os.getenv("POWERBI_EMBED_URL", "").strip(),
         }

@@ -1,7 +1,0 @@
-"use client";
-
-import { XmlImportPage } from "@/components/xml-import-page";
-
-export default function ImportPage() {
-  return <XmlImportPage />;
-}

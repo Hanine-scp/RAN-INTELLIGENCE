@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AppProvider } from "@/components/app-provider";
-import { AuthProvider } from "@/components/auth-provider";
-import { LayoutFrame } from "@/components/layout-frame";
-import { WebVitalsReporter } from "@/components/web-vitals";
-import { ClientErrorBoundary } from "@/components/error-reporter";
-import { ErrorReporterInit } from "@/components/error-reporter-init";
+import { AppProvider } from "@/components/providers/app-provider";
+import { AuthProvider } from "@/components/providers/auth-provider";
+import { LayoutFrame } from "@/components/layout/layout-frame";
+import { WebVitalsReporter } from "@/components/ui/web-vitals";
+import { ClientErrorBoundary } from "@/components/ui/error-reporter";
+import { ErrorReporterInit } from "@/components/ui/error-reporter-init";
 
 export const metadata: Metadata = {
   title: "RAN Intelligence Platform",

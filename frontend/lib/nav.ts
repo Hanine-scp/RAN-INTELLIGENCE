@@ -22,7 +22,6 @@ export const navSections: NavSection[] = [
     label: { Français: "Supervision", English: "Supervision" },
     items: [
       { href: "/timeline", key: "nav_timeline", icon: "compare" },
-      { href: "/automation", key: "nav_automation", icon: "workflow" },
     ],
   },
   {

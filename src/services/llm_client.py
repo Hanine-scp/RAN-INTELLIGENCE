@@ -86,10 +86,13 @@ def embed_model() -> str:
 
 
 def _timeout() -> int:
+    # Le LLM local (Ollama sur CPU) doit échouer vite pour permettre un repli
+    # rapide sur le moteur de règles plutôt que de figer l'interface.
+    key, default = ("LOCAL_LLM_TIMEOUT_SEC", "60") if _is_local_base() else ("OPENAI_TIMEOUT_SEC", "90")
     try:
-        return int(_env("OPENAI_TIMEOUT_SEC", "90"))
+        return int(_env(key, default))
     except ValueError:
-        return 90
+        return int(default)
 
 
 def _chat_endpoint() -> tuple[str, dict[str, str], bool]:

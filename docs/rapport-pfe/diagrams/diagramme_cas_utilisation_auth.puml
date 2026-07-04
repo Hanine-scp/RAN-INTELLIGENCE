@@ -1,0 +1,107 @@
+@startuml diagramme_cas_utilisation_auth
+' ============================================================
+'  RAN INTELLIGENCE - Diagramme de cas d'utilisation
+'  Module : Authentification & gestion des acces
+'  Fidele aux routes /auth (api/auth_routes.py)
+' ============================================================
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 13
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor White
+  BorderColor #2B3A55
+  ArrowColor #2B3A55
+}
+skinparam package {
+  BorderColor #94A3B8
+  BackgroundColor #F7F9FC
+  FontStyle bold
+}
+
+' --- Acteurs -------------------------------------------------
+actor "Responsable\n(utilisateur)" as User
+actor "Administrateur" as Admin
+actor "Visiteur\n(non authentifie)" as Guest
+
+actor "Service Email\n(SMTP/Mailtrap)" as Email
+actor "Service SMS\n(Twilio/Vonage)" as Sms
+
+' --- Systeme -------------------------------------------------
+rectangle "Plateforme RAN Intelligence - Authentification" {
+
+  package "Acces & comptes" {
+    usecase "S'inscrire (signup\navec cle d'invitation)" as UC_Signup
+    usecase "Demander un acces\n(register / approbation)" as UC_Register
+    usecase "Verifier email / telephone\n(OTP d'activation)" as UC_Verify
+  }
+
+  package "Connexion securisee (MFA)" {
+    usecase "Se connecter\n(email + mot de passe)" as UC_Login
+    usecase "Valider le second facteur\n(OTP email + SMS)" as UC_Mfa
+    usecase "Renvoyer un code OTP" as UC_Resend
+    usecase "Se connecter en admin\n(+ cle maitre)" as UC_AdminLogin
+  }
+
+  package "Gestion du compte" {
+    usecase "Mot de passe oublie /\nreinitialiser" as UC_Forgot
+    usecase "Rafraichir la session\n(refresh token)" as UC_Refresh
+    usecase "Se deconnecter" as UC_Logout
+    usecase "Consulter son profil (/me)" as UC_Me
+  }
+
+  package "Administration (RBAC)" {
+    usecase "Amorcer la plateforme\n(bootstrap admin)" as UC_Bootstrap
+    usecase "Creer / gerer\nles comptes" as UC_ManageUsers
+    usecase "Approuver / rejeter\nles demandes d'acces" as UC_Approve
+    usecase "Consulter le journal\nd'audit (security center)" as UC_Audit
+  }
+}
+
+' --- Associations acteurs / cas ------------------------------
+Guest --> UC_Signup
+Guest --> UC_Register
+Guest --> UC_Verify
+Guest --> UC_Login
+Guest --> UC_Forgot
+
+User --> UC_Login
+User --> UC_Mfa
+User --> UC_Resend
+User --> UC_Refresh
+User --> UC_Logout
+User --> UC_Me
+User --> UC_Forgot
+
+Admin --> UC_AdminLogin
+Admin --> UC_Bootstrap
+Admin --> UC_ManageUsers
+Admin --> UC_Approve
+Admin --> UC_Audit
+Admin --> UC_Me
+
+' --- Relations include / extend ------------------------------
+UC_Login ..> UC_Mfa : <<include>>
+UC_AdminLogin ..> UC_Mfa : <<include>>
+UC_Signup ..> UC_Verify : <<include>>
+UC_Register ..> UC_Approve : <<include>>
+UC_Mfa ..> UC_Resend : <<extend>>
+UC_ManageUsers ..> UC_Verify : <<include>>
+
+' --- Acteurs secondaires (notification) ----------------------
+UC_Mfa --> Email
+UC_Mfa --> Sms
+UC_Verify --> Email
+UC_Verify --> Sms
+UC_Forgot --> Email
+UC_AdminLogin --> Sms
+
+note bottom of UC_AdminLogin
+  L'administrateur fournit en plus une
+  **cle maitre** (access_keys: admin_login)
+  validee avant l'envoi des OTP.
+end note
+
+@enduml

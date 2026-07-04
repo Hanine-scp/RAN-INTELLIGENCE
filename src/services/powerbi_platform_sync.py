@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from src.services.data_service import FilterContext, data_service
+from src.services.powerbi_layout import BRIDGE_DIR, RAW_DATASETS, STAGING_DIR, atomic_csv_write, ensure_folders, write_csv
 
 METRIC_LABELS: dict[str, str] = {
     "total_sites": "Total sites",
@@ -34,6 +35,7 @@ CHANGE_TYPE_LABELS: dict[str, str] = {
     "REMOVED": "Supprimé",
 }
 
+# Backward-compatible flat names (deprecated — use bridge/ and facts/)
 PLATFORM_DATASETS = (
     "platform_snapshot_dates.csv",
     "platform_delta_comparison.csv",
@@ -54,14 +56,15 @@ LEGACY_DATASETS = (
     "fact_delta_metric.csv",
     "fact_delta_site_detail.csv",
     "powerbi_dimensions_manifest.json",
+    "pbi_dim_date.csv",
+    "pbi_dim_period.csv",
+    "pbi_dim_metric.csv",
+    "pbi_fact_snapshot_kpi.csv",
+    "pbi_fact_delta_kpi.csv",
+    "pbi_fact_technology.csv",
+    "pbi_fact_equipment_by_type.csv",
+    "powerbi_model.json",
 )
-
-
-def _atomic_csv_write(df: pd.DataFrame, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    tmp = destination.with_suffix(destination.suffix + ".tmp")
-    df.to_csv(tmp, index=False, encoding="utf-8-sig")
-    tmp.replace(destination)
 
 
 def _load_snapshot_dates(processed_dir: Path) -> list[str]:
@@ -82,7 +85,7 @@ def _load_snapshot_dates(processed_dir: Path) -> list[str]:
 
 def _remove_legacy_exports(export_dir: Path) -> list[str]:
     removed: list[str] = []
-    for name in LEGACY_DATASETS:
+    for name in LEGACY_DATASETS + PLATFORM_DATASETS:
         path = export_dir / name
         if path.exists():
             path.unlink()
@@ -92,10 +95,17 @@ def _remove_legacy_exports(export_dir: Path) -> list[str]:
 
 def sync_platform_exports(processed_dir: Path, export_dir: Path) -> dict[str, Any]:
     export_dir.mkdir(parents=True, exist_ok=True)
+    ensure_folders(export_dir)
     removed_legacy = _remove_legacy_exports(export_dir)
 
+    for name in RAW_DATASETS:
+        stale = export_dir / name
+        if stale.exists():
+            stale.unlink()
+            removed_legacy.append(name)
+
     dates = _load_snapshot_dates(processed_dir)
-    ctx = FilterContext.from_inputs()
+    ctx = FilterContext.from_inputs(effective_dates=dates)
 
     period_rows: list[dict[str, str]] = []
     comparison_rows: list[dict[str, Any]] = []
@@ -165,27 +175,45 @@ def sync_platform_exports(processed_dir: Path, export_dir: Path) -> dict[str, An
                 }
             )
 
-    frames = {
-        "platform_snapshot_dates.csv": pd.DataFrame(period_rows),
-        "platform_delta_comparison.csv": pd.DataFrame(comparison_rows),
-        "platform_delta_site_details.csv": pd.DataFrame(detail_rows),
-        "platform_delta_equipment_changes.csv": pd.DataFrame(equipment_rows),
+    structured = {
+        "bridge_snapshot_period.csv": pd.DataFrame(period_rows),
+        "delta_comparison.csv": pd.DataFrame(comparison_rows),
+        "delta_site_details.csv": pd.DataFrame(detail_rows),
+        "equipment_change.csv": pd.DataFrame(equipment_rows),
     }
 
     written: list[str] = []
-    for name, frame in frames.items():
-        _atomic_csv_write(frame, export_dir / name)
-        written.append(name)
+    folder_map = {
+        "bridge_snapshot_period.csv": BRIDGE_DIR,
+        "delta_comparison.csv": STAGING_DIR,
+        "delta_site_details.csv": STAGING_DIR,
+        "equipment_change.csv": STAGING_DIR,
+    }
+    for name, frame in structured.items():
+        rel = write_csv(export_dir, folder_map[name], name, frame)
+        written.append(rel)
+
+    # Legacy flat copies for tools still expecting root-level names
+    legacy_frames = {
+        "platform_snapshot_dates.csv": structured["bridge_snapshot_period.csv"],
+        "platform_delta_comparison.csv": structured["delta_comparison.csv"],
+        "platform_delta_site_details.csv": structured["delta_site_details.csv"],
+        "platform_delta_equipment_changes.csv": structured["equipment_change.csv"],
+    }
+    for name, frame in legacy_frames.items():
+        atomic_csv_write(frame, export_dir / name)
 
     manifest = {
         "synced_at": datetime.now(timezone.utc).isoformat(),
         "source": "platform_api:/delta/compare",
+        "layout_version": "2.0",
         "snapshot_dates": dates,
         "comparison_periods": len(period_rows),
         "comparison_rows": len(comparison_rows),
         "site_detail_rows": len(detail_rows),
         "equipment_change_rows": len(equipment_rows),
         "files": written,
+        "legacy_flat_files": list(legacy_frames.keys()),
         "removed_legacy_files": removed_legacy,
     }
     (export_dir / "platform_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

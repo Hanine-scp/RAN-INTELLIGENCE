@@ -7,7 +7,12 @@ Guide étape par étape pour connecter un dashboard Power BI aux données trait�
 ```
 XML Nokia → Pipeline → data/processed/*.csv
                            ↓ (auto-sync)
-                    data/exports/powerbi/*.csv
+              data/exports/powerbi/
+                ├── raw/           ← copies pipeline (audit)
+                ├── dimensions/    ← star-schema (dim_date, dim_site, …)
+                ├── facts/         ← KPI, qualité, anomalies, risques
+                ├── bridge/        ← périodes de comparaison
+                └── model/         ← powerbi_model.json (relations + pages)
                            ↓
               Power BI Desktop → Service → iframe dans /power-bi
 ```
@@ -16,21 +21,24 @@ XML Nokia → Pipeline → data/processed/*.csv
 
 ## Étape 1 — Vérifier les données exportées
 
-Après chaque ingestion snapshot, le pipeline copie automatiquement les CSV vers :
+Après chaque ingestion snapshot, le pipeline copie et enrichit automatiquement les CSV vers :
 
 ```
 C:\projects\RAN-INTELLIGENCE\data\exports\powerbi\
 ```
 
-Fichiers principaux pour le dashboard global :
+### Structure décisionnelle (v2)
 
-| Fichier | Usage Power BI |
-|---------|----------------|
-| `site_status.csv` | KPI sites (actifs, bloqués, cellules) |
-| `snapshot_summary.csv` | Vue globale par snapshot |
-| `delta_metrics.csv` | Évolution entre dates |
-| `equipment_inventory.csv` | Inventaire détaillé |
-| `site_change_report.csv` | Changements sites |
+| Dossier | Fichiers clés | Usage Power BI |
+|---------|---------------|----------------|
+| `dimensions/` | `dim_date`, `dim_period`, `dim_metric`, `dim_site`, `dim_severity` | Filtres et relations |
+| `facts/` | **`fact_kpi.csv`** | Tous les KPI (snapshot, delta, techno, équipement, executive, spares) — format long |
+| `facts/` | **`fact_signals.csv`** | Qualité, anomalies, risques, changements — format unifié |
+| `bridge/` | `bridge_snapshot_period` | Périodes J-1/J |
+| `model/` | `powerbi_model.json` | Relations, 6 pages recommandées, mesures DAX |
+| `raw/` | 8 CSV pipeline | Couche analyste (inventaire complet) |
+
+Fichiers legacy à la racine (`platform_delta_comparison.csv`, etc.) conservés pour compatibilité.
 
 Sync manuelle (admin) :
 
@@ -46,36 +54,36 @@ Ou depuis l'UI : page **Power BI** → bouton **Synchroniser maintenant**.
 
 1. Télécharger [Power BI Desktop](https://powerbi.microsoft.com/desktop/)
 2. **Obtenir des données** → **Texte/CSV**
-3. Sélectionner le dossier `data/exports/powerbi/`
-4. Charger au minimum :
-   - `site_status`
-   - `snapshot_summary`
-   - `delta_metrics`
+3. Charger les dossiers `dimensions/` et `facts/` depuis `data/exports/powerbi/`
+4. Consulter `model/powerbi_model.json` pour les relations et pages recommandées
+5. Appliquer le thème Ooredoo : `docs/powerbi/ooredoo-ran-theme.json`
 
 ### Modèle de données suggéré
 
 ```
-DimDate (colonne snapshot_date extraite)
-    │
-    ├── FactSites      ← site_status
-    ├── FactSummary    ← snapshot_summary
-    └── FactDelta      ← delta_metrics
+dim_date ──┬── fact_kpi ── dim_period / dim_metric
+           └── fact_signals ── dim_site / dim_severity / dim_anomaly_type
 ```
+
+**2 tables de faits seulement** — filtrer par `kpi_scope` ou `signal_type` dans Power BI.
 
 ### Mesures DAX (exemples)
 
 ```dax
-Total Sites = DISTINCTCOUNT(site_status[site_id])
-Sites Bloqués = CALCULATE(COUNTROWS(site_status), site_status[site_state] = "blocked")
-Taux Dispo = DIVIDE([Sites Actifs], [Total Sites])
+Valeur KPI = SUM(fact_kpi[value])
+Delta sites = CALCULATE(SUM(fact_kpi[delta]), fact_kpi[kpi_scope] = "delta", fact_kpi[metric_name] = "added_sites")
+Anomalies critiques = CALCULATE(COUNTROWS(fact_signals), fact_signals[signal_type] = "anomaly", fact_signals[severity] = "critical")
+Score qualité = CALCULATE(AVERAGE(fact_signals[score]), fact_signals[signal_type] = "quality")
 ```
 
-### Pages recommandées
+### Pages recommandées (voir `powerbi_model.json`)
 
-1. **Executive** — KPI globaux + courbe snapshots
-2. **Delta** — top changements équipements
-3. **Qualité** — serials manquants / complétude
-4. **Techno** — répartition 2G/3G/4G/5G
+1. **Executive — Vue direction** — KPI globaux, disponibilité, alertes
+2. **Delta & Évolutions** — comparaisons inter-snapshots
+3. **Qualité des données** — complétude, risk_score, heatmap sites
+4. **Anomalies & Signaux** — règles plateforme + moteur Guardian
+5. **Prédictions & Risques** — spares, risk_predictions, change events
+6. **Patrimoine réseau** — équipements, technologies, sites
 
 ---
 

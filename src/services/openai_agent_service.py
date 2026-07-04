@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from typing import Any
 
 from src.services import llm_client
@@ -16,6 +18,19 @@ MAX_TOOL_RESULT_CHARS = 12000
 # longueur de génération pour éviter des temps de réponse de plusieurs minutes.
 LOCAL_MAX_TOOL_ROUNDS = 2
 LOCAL_MAX_TOKENS = 700
+# Budget de temps global de la boucle agentique. Au-delà, on abandonne le LLM
+# et on retombe sur le moteur de règles RAN (réponse instantanée et fondée sur
+# les données) afin que l'interface ne reste jamais figée sur « Réflexion… ».
+LOCAL_AGENT_BUDGET_SEC = 75.0
+CLOUD_AGENT_BUDGET_SEC = 150.0
+
+
+def _agent_budget_sec() -> float:
+    default = LOCAL_AGENT_BUDGET_SEC if llm_client.local_llm_enabled() else CLOUD_AGENT_BUDGET_SEC
+    try:
+        return float(os.getenv("LLM_AGENT_BUDGET_SEC", "").strip() or default)
+    except ValueError:
+        return default
 
 
 def _system_prompt(ctx: FilterContext, web_context: str = "") -> str:
@@ -209,9 +224,15 @@ class OpenAIAgentService:
         intent = "openai_agent"
 
         max_rounds = LOCAL_MAX_TOOL_ROUNDS if llm_client.local_llm_enabled() else MAX_TOOL_ROUNDS
+        started_at = time.monotonic()
+        budget = _agent_budget_sec()
 
         try:
             for _ in range(max_rounds):
+                # Repli rapide si le LLM local est trop lent : on renonce et le
+                # service appelant bascule sur le moteur de règles RAN.
+                if time.monotonic() - started_at > budget:
+                    return None
                 data = self._chat(messages, use_tools=True)
                 choice = (data.get("choices") or [{}])[0]
                 message = choice.get("message") or {}

@@ -1,0 +1,231 @@
+@startuml diagramme_classes_auth
+' ============================================================
+'  RAN INTELLIGENCE - Diagramme de classes
+'  Module : Authentification & securite (objets associes)
+'  Fidele a src/services/auth_service.py, auth_database.py,
+'  notification_service.py, access_control.py, api/dependencies.py
+' ============================================================
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype ortho
+skinparam nodesep 35
+skinparam ranksep 55
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 12
+skinparam packageStyle rectangle
+skinparam class {
+  BackgroundColor White
+  BorderColor #2B3A55
+  ArrowColor #2B3A55
+  AttributeFontSize 11
+}
+skinparam package {
+  BorderColor #94A3B8
+  FontStyle bold
+}
+
+' ============================================================
+'  Couche API / Securite d'acces
+' ============================================================
+package "API & dependances (FastAPI)" #F4F7FE {
+  class AuthRouter <<router>> {
+    +POST /auth/login/user
+    +POST /auth/login/user/mfa
+    +POST /auth/login/admin
+    +POST /auth/login/admin/verify
+    +POST /auth/signup
+    +POST /auth/refresh
+    +POST /auth/logout
+    +GET  /auth/me
+  }
+  class ApiDependencies <<module>> {
+    +get_current_user() : AuthUser
+    +require_admin() : AuthUser
+    +require_permission(perm)
+  }
+}
+
+' ============================================================
+'  Service d'authentification (coeur metier)
+' ============================================================
+package "Service d'authentification" #FFF9EC {
+  class AuthService <<service>> {
+    -db_path : Path
+    --
+    +login_user_step1(email, password)
+    +login_user_step2(user_id, email_code, phone_code)
+    +login_admin_step1(email, password, master_key)
+    +login_admin_step2(user_id, email_code, phone_code)
+    +signup_user(...) / verify_signup(...)
+    +bootstrap_admin_signup(...) / verify_bootstrap_admin(...)
+    +refresh_session(refresh_token)
+    +logout(refresh_token)
+    +forgot_password(...) / reset_password(...)
+    +get_user_from_access_token(token) : AuthUser
+    +admin_create_user(...) / list_users()
+    +approve_signup_access(...) / reject_signup_access(...)
+    +security_center_summary()
+    --
+    -_authenticate_password()
+    -_issue_otp() / _verify_otp()
+    -_issue_tokens() / decode_token()
+    -_rotate_personal_access_key()
+    -_validate_access_key()
+    -_hash_secret()  : SHA-256
+    -_audit()
+  }
+  class SecurityVerificationRequired <<exception>> {
+    +user_id : int
+    +channels : list
+    +detail : str
+  }
+}
+
+' ============================================================
+'  Acteurs & RBAC
+' ============================================================
+package "Acteurs & RBAC" #FEF6F4 {
+  class AuthUser <<dataclass>> {
+    +id : int
+    +email : str
+    +phone : str
+    +full_name : str
+    +role : str
+    +job_profile : str
+    +permissions : list<str>
+    +allowed_vendors : list?
+    +allowed_regions : list?
+    +email_verified : bool
+    +phone_verified : bool
+    +is_active : bool
+    +must_change_password : bool
+    +login_security_required : bool
+  }
+  enum Role {
+    admin
+    responsable
+  }
+  class AccessControl <<module>> {
+    +permissions_for(role, profile) : list
+    +clamp_vendor(user, vendor)
+    +user_scope_from_row(row)
+    --
+    {static} USER_BASE_PERMISSIONS
+    {static} ADMIN_EXTRA_PERMISSIONS
+    {static} JOB_PROFILE_PERMISSIONS
+  }
+}
+
+' ============================================================
+'  Notification (OTP / emails)
+' ============================================================
+package "Notification" #ECFBFB {
+  class NotificationService <<service>> {
+    +deliver_otp(channel, recipient, code)
+    +send_otp_email() / send_otp_sms()
+    +start_twilio_verify() / check_twilio_verify()
+    +start_vonage_verify() / check_vonage_verify()
+    +format_phone_e164(phone)
+    +status() : dict
+  }
+}
+
+' ============================================================
+'  Persistance (auth_database.py)
+' ============================================================
+package "Persistance Auth" #F1FBF4 {
+  class AuthDatabase <<module>> {
+    +auth_db_connect() : AuthDbConnection
+    +init_auth_schema(conn)
+    +check_database_connection()
+    +use_postgres() : bool
+  }
+  class AuthDbConnection <<adapter>> {
+    -is_postgres : bool
+    +execute(sql, params) : DbCursor
+    +commit() / rollback()
+  }
+
+  ' --- Tables (entites persistees) ---
+  class User <<table>> {
+    id, email, phone
+    password_hash (bcrypt)
+    full_name, role, job_profile
+    personal_access_key_hash
+    email_verified, phone_verified
+    is_active, signup_status
+    allowed_vendors, allowed_regions
+  }
+  class OtpCode <<table>> {
+    id, user_id
+    channel (email|phone)
+    code_hash (SHA-256)
+    purpose, expires_at
+    consumed_at
+  }
+  class AccessKey <<table>> {
+    id, key_hash
+    key_label
+    key_type (signup|admin_login)
+    max_uses, uses_count
+    expires_at, is_active
+  }
+  class RefreshToken <<table>> {
+    id, user_id
+    token_hash (SHA-256)
+    expires_at, revoked_at
+  }
+  class SecureToken <<table>> {
+    id, user_id
+    token_hash
+    token_type (email_verify|password_reset)
+    expires_at, consumed_at
+  }
+  class AuthAudit <<table>> {
+    id, user_id
+    action, detail
+    created_at
+  }
+}
+
+' ============================================================
+'  RELATIONS
+' ============================================================
+AuthRouter ..> AuthService : delegue
+AuthRouter ..> ApiDependencies : << Depends >>
+ApiDependencies ..> AuthService : get_user_from_access_token()
+ApiDependencies --> AuthUser : injecte
+
+AuthService ..> SecurityVerificationRequired : leve
+AuthService --> AuthUser : produit
+AuthService ..> AccessControl : permissions_for()
+AuthService ..> NotificationService : envoie OTP
+AuthService ..> AuthDatabase : ouvre la connexion
+AuthDatabase --> AuthDbConnection : cree
+
+AuthUser --> Role
+AuthUser ..> AccessControl : scope / permissions
+
+' --- L'AuthService manipule les tables via la connexion ---
+AuthService ..> User : CRUD
+AuthService ..> OtpCode : cree / verifie
+AuthService ..> AccessKey : valide / consomme
+AuthService ..> RefreshToken : emet / revoque
+AuthService ..> SecureToken : email verify / reset
+AuthService ..> AuthAudit : journalise
+
+' --- Cardinalites entre les tables ---
+User "1" -- "0..*" OtpCode : possede
+User "1" -- "0..*" RefreshToken : possede
+User "1" -- "0..*" SecureToken : possede
+User "1" -- "0..*" AuthAudit : trace
+User "1" -- "0..*" AccessKey : created_by
+
+note bottom of User
+  Les *_hash ne stockent jamais de secret en clair :
+  mot de passe en **bcrypt**, OTP / cles / tokens
+  en **SHA-256**. AuthUser (dataclass) est la
+  projection en memoire d'une ligne users.
+end note
+
+@enduml

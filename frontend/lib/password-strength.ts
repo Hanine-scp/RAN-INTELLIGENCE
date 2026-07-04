@@ -1,5 +1,5 @@
 import type { Locale } from "@/lib/i18n";
-import { authT } from "@/lib/auth-i18n";
+import { authT } from "@/lib/auth/auth-i18n";
 
 export type PasswordStrength = "empty" | "weak" | "medium" | "strong";
 
