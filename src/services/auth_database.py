@@ -400,13 +400,25 @@ def _ensure_user_columns(conn: AuthDbConnection) -> None:
             logger.warning("Migration users.%s skipped: %s", column, exc)
 
 
+def _postgres_connect_timeout() -> int:
+    try:
+        return max(1, int(os.getenv("POSTGRES_CONNECT_TIMEOUT_SEC", "2")))
+    except ValueError:
+        return 2
+
+
 @contextmanager
 def auth_db_connect(db_path: Path | None = None) -> Iterator[AuthDbConnection]:
     if use_postgres():
         import psycopg
         from psycopg.rows import dict_row
 
-        conn = psycopg.connect(auth_database_url(), row_factory=dict_row, autocommit=False)
+        conn = psycopg.connect(
+            auth_database_url(),
+            row_factory=dict_row,
+            autocommit=False,
+            connect_timeout=_postgres_connect_timeout(),
+        )
         wrapper = AuthDbConnection(conn, is_postgres=True)
         try:
             yield wrapper

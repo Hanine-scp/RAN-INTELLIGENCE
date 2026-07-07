@@ -6,6 +6,7 @@ import { KpiCards } from "@/components/ui/kpi-cards";
 import { MultiBarChart } from "@/components/charts/charts";
 import { useAppContext } from "@/components/providers/app-provider";
 import { getSpares, getSparesTracking } from "@/lib/api";
+import { useFilterOptions } from "@/lib/hooks/use-filter-options";
 import { CHART_PRIMARY, CHART_SECONDARY } from "@/lib/chart-theme";
 
 type SparesResponse = Awaited<ReturnType<typeof getSpares>>;
@@ -25,7 +26,7 @@ const EMPTY: SparesResponse = {
 };
 
 export function SparesSection() {
-  const { payload, filters } = useAppContext();
+  const { payload, filters, setFilters } = useAppContext();
   const fr = filters.language === "Français";
   const [data, setData] = useState<SparesResponse>(EMPTY);
   const [horizon, setHorizon] = useState(90);
@@ -33,7 +34,40 @@ export function SparesSection() {
   const [errorMessage, setErrorMessage] = useState("");
   const [tracking, setTracking] = useState<Awaited<ReturnType<typeof getSparesTracking>> | null>(null);
 
-  const hasDates = payload.effective_dates.length > 0 || payload.selected_dates.length > 0;
+  const { data: filterOptions } = useFilterOptions(payload);
+  const selectedDates = useMemo(
+    () => (payload.effective_dates?.length ? payload.effective_dates : payload.selected_dates) ?? [],
+    [payload.effective_dates, payload.selected_dates],
+  );
+  const hasDates = selectedDates.length > 0;
+
+  const recommendedDates = useMemo(() => {
+    const dates = (filterOptions?.date_options ?? [])
+      .map((value) => String(value).trim())
+      .filter(Boolean);
+    if (!dates.length) return [];
+    return [...new Set(dates)].sort((a, b) => b.localeCompare(a)).slice(0, 3);
+  }, [filterOptions?.date_options]);
+
+  useEffect(() => {
+    if (!recommendedDates.length) return;
+    const hasCustomSelection = selectedDates.length >= 3;
+    const hasFileOrSiteFilter = Boolean(payload.selected_files?.length || payload.selected_sites?.length);
+    if (!hasCustomSelection && !hasFileOrSiteFilter) {
+      const isSameSelection =
+        selectedDates.length === recommendedDates.length && selectedDates.every((date, index) => date === recommendedDates[index]);
+      if (!isSameSelection) {
+        setFilters({
+          ...filters,
+          selected_dates: recommendedDates,
+          selected_files: [],
+          selected_sites: [],
+          selected_file_dates: [],
+          effective_dates: recommendedDates,
+        });
+      }
+    }
+  }, [filters, payload.selected_files, payload.selected_sites, recommendedDates, selectedDates, setFilters]);
 
   useEffect(() => {
     const load = async () => {

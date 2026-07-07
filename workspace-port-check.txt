@@ -1,0 +1,34 @@
+=== PROCESS LIST ===
+
+   Id ProcessName Path                                                         
+   -- ----------- ----                                                         
+ 5440 node        D:\nodejs\node.exe                                           
+ 7788 node        D:\nodejs\node.exe                                           
+23832 node        D:\nodejs\node.exe                                           
+ 3656 python      C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\py...
+ 4192 python      C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\py...
+12232 python      C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\py...
+13440 python      C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\py...
+31548 python      C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\py...
+33244 python      C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\py...
+
+
+
+=== TCP PORTS ===
+
+LocalAddress LocalPort       State OwningProcess
+------------ ---------       ----- -------------
+::1               3000 Established          7788
+::                3000      Listen          7788
+127.0.0.1         8010      Listen          4192
+
+
+
+=== ANDROID DIR ===
+
+Name                  PSIsContainer
+----                  -------------
+Application mobile RI          True
+
+
+

@@ -441,11 +441,12 @@ class DataService:
                 file_options = files_df.to_dict(orient="records")
 
         site_options: list[dict[str, str]] = []
-        if ctx.effective_dates and ctx.selected_files:
+        if ctx.effective_dates:
             clauses: list[str] = []
             params: list[Any] = []
             _append_in_filter(clauses, params, "CAST(snapshot_date AS VARCHAR)", ctx.effective_dates)
-            _append_in_filter(clauses, params, "CAST(source_file AS VARCHAR)", ctx.selected_files)
+            if ctx.selected_files:
+                _append_in_filter(clauses, params, "CAST(source_file AS VARCHAR)", ctx.selected_files)
             if ctx.site_search:
                 like_term = f"%{ctx.site_search.lower()}%"
                 clauses.append(

@@ -25,24 +25,44 @@ def knowledge_db_path() -> Path:
     return Path(os.getenv("KNOWLEDGE_SQLITE_PATH", "data/knowledge/ran_knowledge.db"))
 
 
+def use_postgres_knowledge_db() -> bool:
+    url = knowledge_database_url().strip()
+    return url.startswith(("postgresql://", "postgres://")) and os.getenv("FORCE_KNOWLEDGE_SQLITE", "0") != "1"
+
+
+def _postgres_connect_timeout() -> int:
+    try:
+        return max(1, int(os.getenv("POSTGRES_CONNECT_TIMEOUT_SEC", "2")))
+    except ValueError:
+        return 2
+
+
 @contextmanager
 def knowledge_db_connect() -> Iterator[AuthDbConnection]:
-    url = knowledge_database_url()
-    if url.startswith(("postgresql://", "postgres://")):
-        import psycopg
-        from psycopg.rows import dict_row
-
-        conn = psycopg.connect(url, row_factory=dict_row, autocommit=False)
-        wrapper = AuthDbConnection(conn, is_postgres=True)
+    if use_postgres_knowledge_db():
         try:
-            yield wrapper
-            wrapper.commit()
+            import psycopg
+            from psycopg.rows import dict_row
+
+            conn = psycopg.connect(
+                knowledge_database_url(),
+                row_factory=dict_row,
+                autocommit=False,
+                connect_timeout=_postgres_connect_timeout(),
+            )
+            wrapper = AuthDbConnection(conn, is_postgres=True)
+            try:
+                yield wrapper
+                wrapper.commit()
+            except Exception:
+                wrapper.rollback()
+                raise
+            finally:
+                conn.close()
+            return
         except Exception:
-            wrapper.rollback()
-            raise
-        finally:
-            conn.close()
-        return
+            if os.getenv("FORCE_KNOWLEDGE_SQLITE", "0") == "1":
+                raise
 
     path = knowledge_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)

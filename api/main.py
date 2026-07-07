@@ -13,7 +13,7 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.cache_helpers import cache_ttl, cached_call, invalidate_all_data_cache
@@ -933,12 +933,23 @@ async def powerbi_sync(_: AuthUser = Depends(require_admin)) -> dict:
     return {"data": result}
 
 
-@app.get("/integrations/powerbi/status")
-def powerbi_status(user: AuthUser = Depends(get_current_user)) -> dict:
-    return {"data": powerbi_export_service.status()}
+@app.get("/integrations/powerbi/csv/{filename}")
+def powerbi_csv(filename: str, user: AuthUser = Depends(get_current_user)) -> Response:
+    safe_name = Path(filename).name
+    if not safe_name.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only .csv files are allowed.")
 
+    export_path = (powerbi_export_service.export_dir / safe_name).resolve()
+    try:
+        export_path.relative_to(powerbi_export_service.export_dir.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid CSV path") from exc
 
-@app.post("/integrations/powerbi/sync")
-async def powerbi_sync(_: AuthUser = Depends(require_admin)) -> dict:
-    result = await asyncio.to_thread(powerbi_export_service.sync_export)
-    return {"data": result}
+    if not export_path.exists() or not export_path.is_file():
+        raise HTTPException(status_code=404, detail="CSV export not found")
+
+    return Response(
+        content=export_path.read_text(encoding="utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )

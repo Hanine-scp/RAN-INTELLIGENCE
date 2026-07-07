@@ -9,6 +9,7 @@ import { getPowerBiStatus, syncPowerBiExport, type PowerBiStatus } from "@/lib/a
 import { isAdmin } from "@/lib/auth";
 import { t } from "@/lib/i18n";
 import { sortTableRows } from "@/lib/sort-table-rows";
+import { PowerBiDashboard } from "@/components/features/platform/powerbi-dashboard";
 
 const CLIENT_EMBED_URL = (process.env.NEXT_PUBLIC_POWER_BI_EMBED_URL ?? "").trim();
 const CLIENT_REPORT_URL = (process.env.NEXT_PUBLIC_POWER_BI_REPORT_URL ?? "").trim();
@@ -275,7 +276,7 @@ NEXT_PUBLIC_POWER_BI_REPORT_URL=https://app.powerbi.com/groups/.../reports/...`}
           allowFullScreen
         />
       ) : (
-        <div className="flex min-h-[420px] flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-6 text-center">
+        <div className="flex min-h-105 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-6 text-center">
           <div className="mb-3 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-yellow-400/20 text-2xl font-black text-yellow-700">
             PBI
           </div>
@@ -297,6 +298,9 @@ NEXT_PUBLIC_POWER_BI_REPORT_URL=https://app.powerbi.com/groups/.../reports/...`}
               {fr ? "Voir le rapport externe" : "View external report"}
             </a>
           ) : null}
+          <div className="mt-6 w-full text-left">
+            <PowerBiDashboard />
+          </div>
         </div>
       )}
     </section>

@@ -12,34 +12,43 @@ import { isAdmin } from "@/lib/auth";
 
 export type SignalsHubTab = "patterns" | "clustering";
 
+type SignalsPageLayoutProps = {
+  initialView?: SignalsHubTab;
+};
+
 function resolveSignalsTab(value: string | null, showClustering: boolean): SignalsHubTab {
-  const normalized = (value ?? "").toLowerCase();
+  const normalized = (value ?? "").toLowerCase().trim();
   if (showClustering && (normalized === "clustering" || normalized === "cluster")) return "clustering";
   return "patterns";
 }
 
-function SignalsPageLayoutInner() {
+function SignalsPageLayoutInner({ initialView }: SignalsPageLayoutProps) {
   const { filters } = useAppContext();
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const showClusteringTab = isAdmin(user);
-  const [activeTab, setActiveTab] = useState<SignalsHubTab>("patterns");
+  const [activeTab, setActiveTab] = useState<SignalsHubTab>(initialView ?? "patterns");
 
   useEffect(() => {
-    const tab = resolveSignalsTab(searchParams.get("view"), showClusteringTab);
-    if (tab === "clustering" && !showClusteringTab) {
+    const view = searchParams.get("view");
+    const normalizedView = (view ?? "").toLowerCase().trim();
+    const resolvedTab = view ? resolveSignalsTab(view, showClusteringTab) : initialView ?? "patterns";
+
+    if (resolvedTab === "clustering" && !showClusteringTab) {
       router.replace("/signals?view=patterns", { scroll: false });
       setActiveTab("patterns");
       return;
     }
-    setActiveTab(tab);
 
-    const view = (searchParams.get("view") ?? "").toLowerCase();
-    if (view === "clustering" || view === "cluster") {
-      router.replace(`/signals?view=${showClusteringTab ? "clustering" : "patterns"}`, { scroll: false });
+    if (normalizedView === "cluster" && showClusteringTab) {
+      router.replace("/signals?view=clustering", { scroll: false });
+      setActiveTab("clustering");
+      return;
     }
-  }, [searchParams, showClusteringTab, router]);
+
+    setActiveTab(resolvedTab);
+  }, [searchParams, showClusteringTab, router, initialView]);
 
   const tabs = useMemo<PremiumHubTabItem<SignalsHubTab>[]>(() => {
     const items: PremiumHubTabItem<SignalsHubTab>[] = [
@@ -89,10 +98,10 @@ function SignalsPageLayoutInner() {
   );
 }
 
-export function SignalsPageLayout() {
+export function SignalsPageLayout({ initialView }: SignalsPageLayoutProps = {}) {
   return (
     <Suspense fallback={<div className="text-sm text-slate-500">Chargement…</div>}>
-      <SignalsPageLayoutInner />
+      <SignalsPageLayoutInner initialView={initialView} />
     </Suspense>
   );
 }

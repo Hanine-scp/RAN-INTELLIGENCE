@@ -1222,12 +1222,21 @@ export type PowerBiStatus = {
   powerbi_embed_url?: string;
 };
 
-export function getPowerBiStatus() {
+export async function getPowerBiStatus() {
   return getJson<PowerBiStatus>("/integrations/powerbi/status");
 }
 
-export function syncPowerBiExport() {
-  return postJson<PowerBiStatus & { missing?: string[]; synced_at?: string }>("/integrations/powerbi/sync", {});
+export async function syncPowerBiExport() {
+  return postJson<Record<string, unknown>>("/integrations/powerbi/sync", {});
+}
+
+export async function getPowerBiCsv(name: string) {
+  const response = await fetchApi(`/integrations/powerbi/csv/${encodeURIComponent(name)}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Failed to load Power BI CSV ${name}`);
+  }
+  return response.text();
 }
 
 export type N8nWorkflow = {

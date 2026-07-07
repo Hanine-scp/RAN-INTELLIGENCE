@@ -2,7 +2,7 @@
 
 import { useReportWebVitals } from "next/web-vitals";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8010").replace(/\/+$/, "");
 const METRICS_ENDPOINT = process.env.NEXT_PUBLIC_METRICS_ENDPOINT ?? `${API_BASE}/ops/client-vitals`;
 
 export function WebVitalsReporter() {

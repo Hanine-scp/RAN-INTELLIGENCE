@@ -2,7 +2,7 @@
 
 import { Component, type ReactNode } from "react";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8010").replace(/\/+$/, "");
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN ?? "";
 
 async function reportClientError(payload: Record<string, unknown>) {

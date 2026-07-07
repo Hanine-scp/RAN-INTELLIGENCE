@@ -83,6 +83,24 @@ def _load_snapshot_dates(processed_dir: Path) -> list[str]:
     return []
 
 
+def _build_snapshot_date_counts(processed_dir: Path) -> pd.DataFrame:
+    summary = processed_dir / "snapshot_summary.csv"
+    if summary.exists():
+        frame = pd.read_csv(summary, usecols=lambda c: c in {"date", "nb_sites"}, dtype=str)
+        if "date" in frame.columns and "nb_sites" in frame.columns and not frame.empty:
+            frame = frame.rename(columns={"date": "snapshot_date", "nb_sites": "site_count"})[["snapshot_date", "site_count"]]
+            return frame.sort_values("snapshot_date", ascending=False)
+
+    site_status = processed_dir / "site_status.csv"
+    if site_status.exists():
+        frame = pd.read_csv(site_status, usecols=lambda c: c == "snapshot_date", dtype=str)
+        if not frame.empty:
+            counts = frame.groupby("snapshot_date", sort=False).size().reset_index(name="site_count")
+            return counts.sort_values("snapshot_date", ascending=False)
+
+    return pd.DataFrame(columns=["snapshot_date", "site_count"])
+
+
 def _remove_legacy_exports(export_dir: Path) -> list[str]:
     removed: list[str] = []
     for name in LEGACY_DATASETS + PLATFORM_DATASETS:
@@ -182,6 +200,9 @@ def sync_platform_exports(processed_dir: Path, export_dir: Path) -> dict[str, An
         "equipment_change.csv": pd.DataFrame(equipment_rows),
     }
 
+    snapshot_rows = _build_snapshot_date_counts(processed_dir)
+    dates = snapshot_rows["snapshot_date"].tolist() or _load_snapshot_dates(processed_dir)
+
     written: list[str] = []
     folder_map = {
         "bridge_snapshot_period.csv": BRIDGE_DIR,
@@ -195,7 +216,7 @@ def sync_platform_exports(processed_dir: Path, export_dir: Path) -> dict[str, An
 
     # Legacy flat copies for tools still expecting root-level names
     legacy_frames = {
-        "platform_snapshot_dates.csv": structured["bridge_snapshot_period.csv"],
+        "platform_snapshot_dates.csv": snapshot_rows,
         "platform_delta_comparison.csv": structured["delta_comparison.csv"],
         "platform_delta_site_details.csv": structured["delta_site_details.csv"],
         "platform_delta_equipment_changes.csv": structured["equipment_change.csv"],
