@@ -1,4 +1,4 @@
-# Guardian Nexus AI · RAN Intelligence
+#  RAN Intelligence
 
 **Plateforme de décision NOC** pour l'analyse quotidienne des snapshots RAN (Nokia, Huawei en préparation) — conçue pour les équipes NOC / Radio d'Ooredoo Tunisie.
 
