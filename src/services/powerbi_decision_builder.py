@@ -95,6 +95,11 @@ SIGNAL_COLUMNS = [
     "metric_value",
     "source_engine",
     "evidence",
+    # Intelligence fields
+    "qualite",
+    "anomalie",
+    "risque",
+    "prediction",
 ]
 
 
@@ -172,34 +177,70 @@ def _build_dim_anomaly_type(anomaly_rows: list[dict[str, Any]]) -> pd.DataFrame:
 
 
 def _snapshot_to_kpi_rows(snapshot_kpi: pd.DataFrame) -> list[dict[str, Any]]:
+    """Extract all KPI metrics from snapshot data, mapping to METRIC_CATALOG."""
     if snapshot_kpi.empty:
         return []
-    metric_cols = [
-        ("sites", "nb_sites", "Total sites"),
-        ("sites", "nb_active_sites", "Sites actifs"),
-        ("sites", "nb_blocked_sites", "Sites bloqués"),
-        ("equipment", "nb_equipment", "Total équipements"),
-        ("cells", "nb_cells_total", "Cellules totales"),
-        ("kpi", "availability_pct", "Disponibilité %"),
-        ("kpi", "equipment_per_site", "Équipements / site"),
-    ]
+    
+    # Map METRIC_CATALOG metrics to available columns in snapshot_kpi
+    metric_mappings = {
+        "total_sites": ("nb_sites", "Total sites", "sites"),
+        "active_sites": ("nb_active_sites", "Sites actifs", "sites"),
+        "blocked_sites": ("nb_blocked_sites", "Sites bloqués", "sites"),
+        "total_equipment": ("nb_equipment", "Total équipements", "equipment"),
+        "cells_2g": ("nb_cells_2g", "Cellules 2G", "cells"),
+        "cells_3g": ("nb_cells_3g", "Cellules 3G", "cells"),
+        "cells_4g": ("nb_cells_4g", "Cellules 4G", "cells"),
+        "cells_4g_fdd": ("nb_cells_4g_fdd", "Cellules 4G FDD", "cells"),
+        "cells_4g_tdd": ("nb_cells_4g_tdd", "Cellules 4G TDD", "cells"),
+        "cells_5g": ("nb_cells_5g", "Cellules 5G", "cells"),
+        "unique_serials": ("nb_unique_serials", "Serials uniques", "equipment"),
+        "missing_serials": ("nb_missing_serials", "Serials manquants", "equipment"),
+    }
+    
     rows: list[dict[str, Any]] = []
     for _, record in snapshot_kpi.iterrows():
         snapshot_date = str(record.get("snapshot_date", ""))
-        for group, name, label in metric_cols:
-            if name not in record.index:
-                continue
-            value = record.get(name, "")
-            rows.append(
-                {
+        
+        # Add all defined metrics where data exists
+        for metric_name, (col_name, label, group) in metric_mappings.items():
+            if col_name in record.index:
+                value = record.get(col_name, "")
+                if pd.notna(value) and value != "":
+                    rows.append({
+                        "kpi_scope": "snapshot",
+                        "snapshot_date": snapshot_date,
+                        "metric_group": group,
+                        "metric_name": metric_name,
+                        "metric_label": label,
+                        "value": value,
+                    })
+        
+        # Add calculated metrics (if base metrics exist)
+        if "nb_sites" in record.index and "nb_active_sites" in record.index:
+            nb_sites = record.get("nb_sites", 0)
+            if nb_sites and pd.notna(nb_sites):
+                nb_sites = int(nb_sites)
+                rows.append({
                     "kpi_scope": "snapshot",
                     "snapshot_date": snapshot_date,
-                    "metric_group": group,
-                    "metric_name": name,
-                    "metric_label": label,
-                    "value": value,
-                }
-            )
+                    "metric_group": "kpi",
+                    "metric_name": "availability_pct",
+                    "metric_label": "Disponibilité %",
+                    "value": round(100 * int(record.get("nb_active_sites", 0)) / nb_sites, 2) if nb_sites else 0,
+                })
+                
+                if "nb_equipment" in record.index:
+                    nb_equipment = record.get("nb_equipment", 0)
+                    if pd.notna(nb_equipment):
+                        rows.append({
+                            "kpi_scope": "snapshot",
+                            "snapshot_date": snapshot_date,
+                            "metric_group": "kpi",
+                            "metric_name": "equipment_per_site",
+                            "metric_label": "Équipements / site",
+                            "value": round(int(nb_equipment) / nb_sites, 1) if nb_sites else 0,
+                        })
+    
     return rows
 
 
@@ -326,6 +367,35 @@ def _spares_to_kpi_rows(predictions: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
+def _prediction_to_signal_rows(prediction_frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Convert prediction/forecast data to signal rows for BI consumption."""
+    if prediction_frame.empty:
+        return []
+    rows: list[dict[str, Any]] = []
+    for _, record in prediction_frame.iterrows():
+        rows.append(
+            {
+                "signal_type": "prediction",
+                "snapshot_date": record.get("snapshot_date", ""),
+                "site_id": record.get("site_id", ""),
+                "entity_id": record.get("entity_id", ""),
+                "object_type": record.get("object_type", ""),
+                "severity": "",
+                "signal_label": record.get("forecast_type", "") or record.get("prediction_type", "") or "forecast",
+                "detail": record.get("forecast_summary", "") or record.get("prediction_summary", ""),
+                "score": record.get("confidence_score", record.get("forecast_confidence", "")),
+                "metric_value": record.get("predicted_value", ""),
+                "source_engine": "predictive_service",
+                "evidence": record.get("evidence", ""),
+                "qualite": "",
+                "anomalie": "",
+                "risque": "",
+                "prediction": record.get("confidence_score", record.get("forecast_confidence", "")),  # Prediction confidence
+            }
+        )
+    return rows
+
+
 def _quality_to_signal_rows(quality_frame: pd.DataFrame) -> list[dict[str, Any]]:
     if quality_frame.empty:
         return []
@@ -342,6 +412,10 @@ def _quality_to_signal_rows(quality_frame: pd.DataFrame) -> list[dict[str, Any]]
                 "detail": f"completeness={record.get('completeness_percent', '')}%",
                 "score": record.get("risk_score", record.get("completeness_percent", "")),
                 "metric_value": record.get("records", ""),
+                "qualite": record.get("completeness_percent", ""),  # Quality score
+                "anomalie": "",
+                "risque": record.get("risk_score", ""),
+                "prediction": "",
             }
         )
     return rows
@@ -365,6 +439,10 @@ def _anomaly_to_signal_rows(anomaly_frame: pd.DataFrame) -> list[dict[str, Any]]
                 "metric_value": record.get("metric_value", ""),
                 "source_engine": record.get("source_engine", ""),
                 "evidence": record.get("evidence", ""),
+                "qualite": "",
+                "anomalie": record.get("anomaly_score", record.get("severity_score", "")),  # Anomaly detection score
+                "risque": "",
+                "prediction": "",
             }
         )
     return rows
@@ -386,6 +464,10 @@ def _risk_to_signal_rows(risk_frame: pd.DataFrame) -> list[dict[str, Any]]:
                 "detail": record.get("summary", record.get("description", "")),
                 "score": record.get("risk_score", ""),
                 "source_engine": "guardian",
+                "qualite": "",
+                "anomalie": "",
+                "risque": record.get("risk_score", ""),  # Risk prediction score
+                "prediction": "",
             }
         )
     return rows
@@ -412,6 +494,10 @@ def _change_to_signal_rows(change_frame: pd.DataFrame, signal_type: str) -> list
                 "metric_value": record.get("nb_equipment", ""),
                 "source_engine": record.get("source_engine", "guardian" if signal_type == "guardian_change" else "platform"),
                 "evidence": record.get("evidence", ""),
+                "qualite": "",
+                "anomalie": "",
+                "risque": "",
+                "prediction": record.get("replacement_score", "") if "replacement" in signal_type.lower() else "",
             }
         )
     return rows
@@ -508,6 +594,7 @@ def _build_fact_signals(
     rows.extend(_quality_to_signal_rows(intelligence["quality"]))
     rows.extend(_anomaly_to_signal_rows(intelligence["anomaly"]))
     rows.extend(_risk_to_signal_rows(intelligence["risk"]))
+    rows.extend(_prediction_to_signal_rows(intelligence["prediction"]))
     rows.extend(_change_to_signal_rows(intelligence["guardian_change"], "guardian_change"))
     rows.extend(_change_to_signal_rows(site_details, "site_delta"))
     rows.extend(_change_to_signal_rows(equipment_changes, "equipment_change"))
