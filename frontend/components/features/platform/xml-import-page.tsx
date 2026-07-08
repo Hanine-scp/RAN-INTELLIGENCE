@@ -17,6 +17,8 @@ const PIPELINE_STEP_KEYS = [
   "import_pipeline_quality",
 ] as const;
 
+const LAST_IMPORT_SUMMARY_STORAGE_KEY = "ran_intelligence_last_import_summary";
+
 type PipelineStatus = "idle" | "processing" | "done" | "error";
 
 type ProcessingSummary = {
@@ -33,6 +35,26 @@ function defaultSnapshotDate() {
   const m = String(now.getMonth() + 1).padStart(2, "0");
   const d = String(now.getDate()).padStart(2, "0");
   return `${y}.${m}.${d}`;
+}
+
+function readLastImportSummary(): ProcessingSummary | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.localStorage.getItem(LAST_IMPORT_SUMMARY_STORAGE_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored) as ProcessingSummary;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastImportSummary(summary: ProcessingSummary | null) {
+  if (typeof window === "undefined") return;
+  if (!summary) {
+    window.localStorage.removeItem(LAST_IMPORT_SUMMARY_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(LAST_IMPORT_SUMMARY_STORAGE_KEY, JSON.stringify(summary));
 }
 
 function isXmlFile(file: File) {
@@ -59,6 +81,25 @@ export function XmlImportPage() {
   const [processingSummary, setProcessingSummary] = useState<ProcessingSummary | null>(null);
 
   const canImport = isAdmin(user);
+
+  useEffect(() => {
+    const storedSummary = readLastImportSummary();
+    if (storedSummary) {
+      setProcessingSummary(storedSummary);
+      setFilters((currentFilters) => ({
+        ...currentFilters,
+        selected_dates: [storedSummary.snapshot_date],
+        selected_files: [],
+        selected_sites: [],
+        selected_file_dates: [],
+        effective_dates: [storedSummary.snapshot_date],
+      }));
+    }
+  }, [setFilters]);
+
+  useEffect(() => {
+    writeLastImportSummary(processingSummary);
+  }, [processingSummary]);
 
   useEffect(() => {
     if (pipelineStatus !== "processing") return;
@@ -197,7 +238,7 @@ export function XmlImportPage() {
           className={`cursor-pointer rounded-2xl border-2 border-dashed px-6 py-12 text-center transition ${
             dragOver
               ? "border-teal-400 bg-teal-50/80"
-              : "border-slate-200 bg-gradient-to-b from-slate-50/80 to-white hover:border-teal-300 hover:bg-teal-50/40"
+              : "border-slate-200 bg-linear-to-b from-slate-50/80 to-white hover:border-teal-300 hover:bg-teal-50/40"
           } ${uploading ? "pointer-events-none opacity-70" : ""}`}
         >
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-red-100 bg-white text-slate-500 shadow-sm">
@@ -221,7 +262,7 @@ export function XmlImportPage() {
           </button>
         </div>
 
-        <article className="mt-5 rounded-2xl border border-red-100 bg-gradient-to-r from-red-50/40 to-white p-4">
+        <article className="mt-5 rounded-2xl border border-red-100 bg-linear-to-r from-red-50/40 to-white p-4">
           <p className="mb-4 text-sm font-bold text-slate-900">{t(filters.language, "import_pipeline_title")}</p>
           <ol className="space-y-3">
             {PIPELINE_STEP_KEYS.map((key, index) => {

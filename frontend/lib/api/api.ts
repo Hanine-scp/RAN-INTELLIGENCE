@@ -700,6 +700,7 @@ export function getSpares(payload: FilterPayload, horizon_days = 90, service_lev
 export function getClustering(payload: FilterPayload, n_clusters = 4) {
   return postJson<{
     available: boolean;
+    reason?: string;
     points: Record<string, unknown>[];
     clusters: Record<string, unknown>[];
     health_distribution: { band: string; count: number }[];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ImportAiReportModal } from "@/components/reports/import-ai-report-modal";
 import { PremiumPageReportBar } from "@/components/ui/premium-page-report-bar";
 import { useAppContext } from "@/components/providers/app-provider";
@@ -32,6 +32,18 @@ type ImportAiReportSectionProps = {
   snapshotDate: string | null;
   importStats?: ImportStats;
 };
+
+type StoredImportReport = {
+  snapshotDate: string;
+  focus: ReportFocus;
+  customNeeds: string;
+  report: AiReport | null;
+  aiInsight: AssistantInsightResponse | null;
+  severityChart: { level: string; count: number }[];
+  tableData: ImportReportTableData | null;
+};
+
+const LAST_IMPORT_REPORT_STORAGE_KEY = "ran_intelligence_last_import_report";
 
 const FOCUS_OPTIONS: ReportFocus[] = ["executive", "risks", "quality", "full"];
 
@@ -87,6 +99,46 @@ export function ImportAiReportSection({ snapshotDate, importStats }: ImportAiRep
   const [aiInsight, setAiInsight] = useState<AssistantInsightResponse | null>(null);
   const [severityChart, setSeverityChart] = useState<{ level: string; count: number }[]>([]);
   const [tableData, setTableData] = useState<ImportReportTableData | null>(null);
+
+  useEffect(() => {
+    if (!snapshotDate) return;
+
+    try {
+      const stored = window.localStorage.getItem(LAST_IMPORT_REPORT_STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as StoredImportReport;
+      if (parsed.snapshotDate !== snapshotDate) return;
+
+      setFocus(parsed.focus);
+      setCustomNeeds(parsed.customNeeds);
+      setReport(parsed.report);
+      setAiInsight(parsed.aiInsight);
+      setSeverityChart(parsed.severityChart);
+      setTableData(parsed.tableData);
+    } catch {
+      // ignore invalid stored data
+    }
+  }, [snapshotDate]);
+
+  useEffect(() => {
+    if (!snapshotDate) return;
+
+    const data: StoredImportReport = {
+      snapshotDate,
+      focus,
+      customNeeds,
+      report,
+      aiInsight,
+      severityChart,
+      tableData,
+    };
+
+    try {
+      window.localStorage.setItem(LAST_IMPORT_REPORT_STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      // ignore storage failures
+    }
+  }, [snapshotDate, focus, customNeeds, report, aiInsight, severityChart, tableData]);
 
   const ready = Boolean(snapshotDate);
   const hasAiQuery = customNeeds.trim().length > 0;

@@ -618,7 +618,11 @@ copy .env.auth.example .env.auth
 python scripts/init_auth_database.py
 ```
 
-### 6. IA (optionnel)
+### 6. AI / feature env files (optionnel)
+
+- `.env.ai` : AI provider keys, local LLM settings, knowledge DB connection
+- `.env.performance` : premium performance tuning / feature flags
+- `.env.powerbi` : Power BI export settings and report URLs
 
 ```powershell
 copy .env.ai.example .env.ai
@@ -682,7 +686,10 @@ OTP réels : `MAILTRAP_API_TOKEN` + `TWILIO_VERIFY_SERVICE_SID` — voir `docs/A
 | `.env.docker` | Chemins Docker, ports, URL API frontend |
 | `.env.auth` | JWT, admin seed, Mailtrap Live SMTP, Twilio Verify OTP |
 | `.env.ai` | OpenAI, Claude, `KNOWLEDGE_DATABASE_URL` |
+| `.env.performance` | Optional performance / premium feature settings |
+| `.env.powerbi` | Optional Power BI export and embed settings |
 | `.env.bigdata` | MinIO, Spark, TimescaleDB, Redis |
+| `.env.identity` | n8n automation only — not loaded by the API |
 | `frontend/.env.local` | `NEXT_PUBLIC_API_BASE_URL` |
 
 Variables d'environnement pipeline :

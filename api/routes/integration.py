@@ -19,12 +19,21 @@ def public_signup_enabled() -> bool:
     return os.getenv("AUTH_PUBLIC_SIGNUP", "false").lower() in {"1", "true", "yes"}
 
 
+def google_oauth_enabled() -> bool:
+    return auth_provider() == "google" and bool(os.getenv("GOOGLE_CLIENT_ID")) and bool(os.getenv("GOOGLE_REDIRECT_URI"))
+
+
 @router.get("/auth/config")
 def integration_auth_config() -> dict[str, Any]:
     return {
         "data": {
             "provider": auth_provider(),
             "public_signup": public_signup_enabled(),
+            "oauth": {
+                "google_enabled": google_oauth_enabled(),
+                "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+                "google_redirect_uri": os.getenv("GOOGLE_REDIRECT_URI", ""),
+            },
         }
     }
 

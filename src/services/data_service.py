@@ -91,9 +91,18 @@ class FilterContext:
         vendor: str = "nokia",
     ) -> "FilterContext":
         set_active_vendor(vendor)
+
+        def normalize_site_value(value: str) -> str:
+            normalized = value.strip()
+            if "|" in normalized:
+                parts = [part.strip() for part in normalized.split("|") if part.strip()]
+                if len(parts) >= 2:
+                    return parts[1]
+            return normalized
+
         dates = [str(d) for d in (selected_dates or []) if str(d)]
         files = [str(f) for f in (selected_files or []) if str(f)]
-        sites = [str(s) for s in (selected_sites or []) if str(s)]
+        sites = [normalize_site_value(str(s)) for s in (selected_sites or []) if str(s)]
         file_dates = [str(d) for d in (selected_file_dates or []) if str(d)]
         effective = [str(d) for d in (effective_dates or []) if str(d)] or file_dates or dates
         if date_search:
@@ -3828,9 +3837,19 @@ class DataService:
                 }
             )
 
-        risk_index = min(
-            100,
-            critical * 18 + high * 10 + blocked_sites * 4 + min(25, anomalies["summary"]["total"]),
+        from src.services.predictive_risk_service import predictive_risk_service
+
+        predictions = predictive_risk_service.get_risk_predictions(snapshot_date=latest, vendor=ctx.vendor, limit=10)
+        if not predictions:
+            predictions = predictive_risk_service.compute_risk_predictions(ctx, snapshot_date=latest, persist=False)[:10]
+        predicted_index = int(round(max((row.get("risk_score", 0.0) for row in predictions), default=0.0) * 100))
+
+        risk_index = max(
+            min(
+                100,
+                critical * 18 + high * 10 + blocked_sites * 4 + min(25, anomalies["summary"]["total"]),
+            ),
+            predicted_index,
         )
 
         return {
@@ -3883,6 +3902,13 @@ class DataService:
         }
         if not dates:
             return empty
+
+        if len(dates) == 1:
+            latest = dates[0]
+            lake = _lake()
+            available_dates = [date for date in sorted(lake.snapshot_dates) if date <= latest]
+            if len(available_dates) > 1:
+                dates = available_dates[-4:]
 
         period_days = self._period_days(dates)
         latest = dates[-1]
@@ -4013,6 +4039,7 @@ class DataService:
             "clusters": [],
             "health_distribution": [],
             "summary": {"sites": 0, "clusters": 0},
+            "reason": "missing_snapshot_date",
         }
         if not dates:
             return empty
@@ -4030,11 +4057,17 @@ class DataService:
             from sklearn.decomposition import PCA
             from sklearn.preprocessing import StandardScaler
         except Exception:
-            return empty
+            return {
+                **empty,
+                "reason": "sklearn_missing",
+            }
 
         frame = self._build_site_feature_frame(dates, scope_clauses, scope_params)
         if frame.empty or len(frame) < max(12, n_clusters * 3):
-            return empty
+            return {
+                **empty,
+                "reason": "insufficient_sites",
+            }
 
         k = max(2, min(8, int(n_clusters)))
         matrix = frame[self._ML_FEATURES].to_numpy(dtype=float)

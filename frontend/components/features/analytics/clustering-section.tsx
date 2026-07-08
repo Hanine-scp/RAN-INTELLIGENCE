@@ -135,13 +135,20 @@ export function ClusteringSection() {
 
           {!data.available ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-8 text-center text-sm text-amber-800">
-              {loading
-                ? fr
-                  ? "Clustering en cours..."
-                  : "Clustering in progress..."
-                : fr
-                  ? "Clustering indisponible (≥ 12 sites requis ou scikit-learn manquant)."
-                  : "Clustering unavailable (≥ 12 sites required or scikit-learn missing)."}
+              {loading ? (
+                fr ? "Clustering en cours..." : "Clustering in progress..."
+              ) : (
+                <>
+                  <p>
+                    {fr
+                      ? "Clustering indisponible (≥ 12 sites requis ou scikit-learn manquant)."
+                      : "Clustering unavailable (≥ 12 sites required or scikit-learn missing)."}
+                  </p>
+                  {data.reason ? (
+                    <p className="mt-2 text-xs text-slate-600">{fr ? "Raison" : "Reason"}: {data.reason}</p>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : (
             <>

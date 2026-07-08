@@ -37,8 +37,11 @@ async function publicPost<T>(path: string, payload: unknown): Promise<T> {
 export function getIntegrationAuthConfig() {
   return publicGet<{
     provider: string;
-    public_signup: boolean;
-  }>("/integrations/auth/config");
+    public_signup: boolean;    oauth?: {
+      google_enabled: boolean;
+      google_client_id?: string;
+      google_redirect_uri?: string;
+    };  }>("/integrations/auth/config");
 }
 
 export function getBootstrapStatus() {

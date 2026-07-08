@@ -12,6 +12,7 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -168,6 +169,34 @@ def health() -> dict[str, str]:
 @app.get("/ready")
 def ready() -> dict[str, bool]:
     return {"ready": lake_ready()}
+
+
+@app.get("/diagnostics/data-status")
+def data_status() -> dict[str, Any]:
+    """Check what data is available in the data lake."""
+    try:
+        from pathlib import Path
+        data_root = Path(os.getenv("DATA_LAKE_ROOT", "data/lake"))
+        
+        status = {
+            "data_root": str(data_root),
+            "exists": data_root.exists(),
+            "parquet_files": {},
+        }
+        
+        if data_root.exists():
+            for file in data_root.glob("*.parquet"):
+                try:
+                    import duckdb
+                    result = duckdb.query(f"SELECT COUNT(*) as count FROM read_parquet('{file}')").fetchall()
+                    count = result[0][0] if result else 0
+                    status["parquet_files"][file.name] = {"exists": True, "row_count": count}
+                except Exception as e:
+                    status["parquet_files"][file.name] = {"exists": True, "error": str(e)}
+        
+        return status
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/ingest/xml")

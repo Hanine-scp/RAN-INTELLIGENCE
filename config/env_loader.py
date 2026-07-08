@@ -33,9 +33,23 @@ def _apply_env_aliases() -> None:
         os.environ["SMTP_PASSWORD"] = os.getenv("MAILTRAP_API_TOKEN", "")
     if not os.getenv("SMTP_USER") and os.getenv("MAILTRAP_API_TOKEN"):
         os.environ["SMTP_USER"] = "api"
+    if not os.getenv("AUTH_PROVIDER") and os.getenv("OAUTH_PROVIDER"):
+        os.environ["AUTH_PROVIDER"] = os.getenv("OAUTH_PROVIDER", "")
+    if not os.getenv("GOOGLE_CLIENT_ID") and os.getenv("AUTH_GOOGLE_CLIENT_ID"):
+        os.environ["GOOGLE_CLIENT_ID"] = os.getenv("AUTH_GOOGLE_CLIENT_ID", "")
+    if not os.getenv("GOOGLE_CLIENT_SECRET") and os.getenv("AUTH_GOOGLE_CLIENT_SECRET"):
+        os.environ["GOOGLE_CLIENT_SECRET"] = os.getenv("AUTH_GOOGLE_CLIENT_SECRET", "")
+    if not os.getenv("GOOGLE_REDIRECT_URI") and os.getenv("AUTH_GOOGLE_REDIRECT_URI"):
+        os.environ["GOOGLE_REDIRECT_URI"] = os.getenv("AUTH_GOOGLE_REDIRECT_URI", "")
 
 
 def load_auth_env() -> None:
+    """Load auth and optional feature environment files.
+
+    The API loads `.env.auth` first, then optional backend files for AI, performance,
+    and Power BI features, and finally falls back to `.env` for any remaining values.
+    Note: `.env.identity` is not loaded by the API; it is only used by docker/n8n automation.
+    """
     _patch_bcrypt_for_passlib()
     root = Path(__file__).resolve().parents[1]
     for name in (".env.auth", ".env.ai", ".env.performance", ".env.powerbi", ".env"):

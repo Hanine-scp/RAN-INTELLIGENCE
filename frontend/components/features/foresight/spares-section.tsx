@@ -160,6 +160,14 @@ export function SparesSection() {
         <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{errorMessage}</p>
       ) : null}
 
+      {data.summary.total_replacements === 0 && data.summary.period_days > 0 ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {fr
+            ? "Aucun churn détecté sur la période sélectionnée. Sélectionnez davantage de snapshots ou laissez l’outil utiliser les derniers snapshots disponibles."
+            : "No churn detected over the selected period. Choose a wider snapshot window or allow the tool to use the latest available snapshots."}
+        </div>
+      ) : null}
+
       <KpiCards items={kpis} />
 
       {data.top_chart.length ? (
