@@ -145,7 +145,7 @@ export default function Home() {
     };
   }, [data]);
 
-  if (!payload.selected_dates.length && !payload.effective_dates?.length) {
+  if (!payload.selected_dates.length && !payload.effective_dates?.length && !loading && !data) {
     return <p className="rounded-xl border border-amber-200 bg-amber-50 p-4">{t(filters.language, "warning_dates")}</p>;
   }
 

@@ -1,5 +1,5 @@
 import { getAccessToken, getRefreshToken, saveSession, type AuthSession, type AuthUser } from "@/lib/auth";
-import { fetchWithRetry } from "@/lib/api/fetch-client";
+import { fetchWithRetry, type FetchWithRetryOptions } from "@/lib/api/fetch-client";
 import type { ApiEnvelope, FilterPayload, PaginatedQuery } from "@/lib/types";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8010").replace(/\/+$/, "");
@@ -109,7 +109,7 @@ async function refreshSessionDeduped(): Promise<AuthSession | null> {
   return refreshInFlight;
 }
 
-async function fetchApi(path: string, init: RequestInit = {}, auth = true): Promise<Response> {
+async function fetchApi(path: string, init: RequestInit = {}, auth = true, options: FetchWithRetryOptions = {}): Promise<Response> {
   const buildInit = (useAuth: boolean): RequestInit => {
     const headers = new Headers(init.headers);
     if (useAuth) {
@@ -126,6 +126,7 @@ async function fetchApi(path: string, init: RequestInit = {}, auth = true): Prom
   try {
     response = await fetchWithRetry(`${API_BASE_URL}${path}`, buildInit(auth), {
       requestId: crypto.randomUUID(),
+      ...options,
     });
   } catch (error) {
     throw new Error(toErrorMessage(path, error));
@@ -155,8 +156,8 @@ async function readJsonEnvelope<T>(response: Response, path: string): Promise<T>
   return envelope.data;
 }
 
-async function postJson<T>(path: string, payload: unknown, auth = true): Promise<T> {
-  const response = await fetchApi(path, { method: "POST", body: JSON.stringify(payload) }, auth);
+async function postJson<T>(path: string, payload: unknown, auth = true, options: FetchWithRetryOptions = {}): Promise<T> {
+  const response = await fetchApi(path, { method: "POST", body: JSON.stringify(payload) }, auth, options);
   return readJsonEnvelope<T>(response, path);
 }
 
@@ -1228,7 +1229,10 @@ export async function getPowerBiStatus() {
 }
 
 export async function syncPowerBiExport() {
-  return postJson<Record<string, unknown>>("/integrations/powerbi/sync", {});
+  return postJson<Record<string, unknown>>("/integrations/powerbi/sync", {}, true, {
+    timeoutMs: 120000,
+    retries: 0,
+  });
 }
 
 export async function getPowerBiCsv(name: string) {

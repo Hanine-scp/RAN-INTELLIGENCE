@@ -599,6 +599,8 @@ class DataService:
     def get_dashboard(self, ctx: FilterContext) -> dict[str, Any]:
         effective_dates = sorted(ctx.effective_dates or ctx.selected_dates)
         if not effective_dates:
+            effective_dates = sorted(get_snapshot_dates())
+        if not effective_dates:
             return {"kpis": {}, "summary": [], "equipment_summary": []}
 
         latest_date = effective_dates[-1]

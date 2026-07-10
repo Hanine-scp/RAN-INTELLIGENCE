@@ -11,13 +11,12 @@ export type DashboardData = {
   equipment_summary: Record<string, unknown>[];
 };
 
-function dashboardKey(payload: FilterPayload): string | null {
-  const hasDates = payload.effective_dates?.length || payload.selected_dates?.length;
-  if (!hasDates) return null;
+function dashboardKey(payload: FilterPayload): string {
   return [
     "dashboard",
     payload.vendor,
     ...(payload.effective_dates ?? []).sort(),
+    ...(payload.selected_dates ?? []).sort(),
     ...(payload.selected_sites ?? []).sort(),
     ...(payload.selected_files ?? []).sort(),
     payload.smart_missing_serial ? "1" : "0",
