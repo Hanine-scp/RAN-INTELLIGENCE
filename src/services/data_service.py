@@ -605,9 +605,28 @@ class DataService:
 
         latest_date = effective_dates[-1]
         oldest_date = effective_dates[0]
-        site_where, site_params, equipment_where, equipment_params = self._site_and_equipment_where(ctx)
+        # Resolve dates into the query context — discovery above must not leave WHERE empty.
+        query_ctx = FilterContext.from_inputs(
+            selected_dates=effective_dates,
+            effective_dates=effective_dates,
+            selected_files=ctx.selected_files,
+            selected_sites=ctx.selected_sites,
+            selected_file_dates=ctx.selected_file_dates,
+            site_search=ctx.site_search,
+            date_search="",
+            period_start="",
+            period_end="",
+            smart_missing_serial=ctx.smart_missing_serial,
+            smart_duplicates=ctx.smart_duplicates,
+            smart_critical_quality=ctx.smart_critical_quality,
+            language=ctx.language,
+            vendor=ctx.vendor,
+        )
+        site_where, site_params, equipment_where, equipment_params = self._site_and_equipment_where(query_ctx)
+        if not site_where or not equipment_where:
+            return {"kpis": {}, "summary": [], "equipment_summary": []}
 
-        site_kpi = query(
+        site_kpi_df = query(
             f"""
             SELECT
                 COUNT(DISTINCT CAST(snapshot_date AS VARCHAR) || '|' || CAST(site_id AS VARCHAR)) AS total_sites,
@@ -621,15 +640,23 @@ class DataService:
             WHERE {site_where}
             """,
             site_params,
-        ).iloc[0]
-        equipment_kpi = query(
+        )
+        if site_kpi_df.empty:
+            return {"kpis": {}, "summary": [], "equipment_summary": []}
+        site_kpi = site_kpi_df.iloc[0]
+        equipment_kpi_df = query(
             f"""
             SELECT COALESCE(SUM(nb_equipment), 0) AS total_equipment
             FROM read_parquet('{_lake().equipment}')
             WHERE {equipment_where}
             """,
             equipment_params,
-        ).iloc[0]
+        )
+        equipment_kpi = (
+            equipment_kpi_df.iloc[0]
+            if not equipment_kpi_df.empty
+            else pd.Series({"total_equipment": 0})
+        )
 
         summary = query(
             f"""

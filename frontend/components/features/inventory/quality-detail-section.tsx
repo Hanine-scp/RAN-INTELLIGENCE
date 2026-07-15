@@ -32,10 +32,6 @@ export function QualityDetailSection() {
     return Number.isFinite(num) ? num : 0;
   };
 
-  if (isLoading && !data) {
-    return <PageLoadingSkeleton />;
-  }
-
   const onInvestigateSite = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!siteId.trim()) {
@@ -157,6 +153,10 @@ export function QualityDetailSection() {
   const closeQualityDetail = () => {
     setSelectedQualityKeys([]);
   };
+
+  if (isLoading && !data) {
+    return <PageLoadingSkeleton />;
+  }
 
   return (
     <div className="space-y-4">

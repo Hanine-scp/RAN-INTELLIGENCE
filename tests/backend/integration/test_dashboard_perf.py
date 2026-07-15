@@ -15,7 +15,9 @@ def _elapsed_ms(start: float) -> float:
     return (time.perf_counter() - start) * 1000
 
 
-def test_dashboard_empty_context_budget():
+def test_dashboard_empty_context_budget(monkeypatch):
+    # Isolate the early-return path (no discovered snapshots / no lake dates).
+    monkeypatch.setattr("src.services.data_service.get_snapshot_dates", lambda: [])
     ctx = FilterContext.from_inputs(selected_dates=[], effective_dates=[])
     start = time.perf_counter()
     result = data_service.get_dashboard(ctx)
