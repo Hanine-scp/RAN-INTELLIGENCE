@@ -10,6 +10,7 @@
 
 ## Table des matières
 
+- [Démarrage rapide (5 min)](#démarrage-rapide-5-min)
 - [Vision](#vision)
 - [Fonctionnalités](#fonctionnalités)
 - [Architecture](#architecture)
@@ -19,6 +20,7 @@
 - [API REST](#api-rest)
 - [Assistant IA](#assistant-ia)
 - [Authentification & rôles](#authentification--rôles)
+- [Clients web & mobile](#clients-web--mobile)
 - [Workflows opérationnels](#workflows-opérationnels)
 - [Structure du projet](#structure-du-projet)
 - [Prérequis](#prérequis)
@@ -29,6 +31,44 @@
 - [CI/CD](#cicd)
 - [Roadmap & limites connues](#roadmap--limites-connues)
 - [Documentation complémentaire](#documentation-complémentaire)
+
+---
+
+## Démarrage rapide (5 min)
+
+Prérequis : Python 3.12+, Node.js 22+, snapshots XML locaux (voir [`samples/`](samples/README.md)).
+
+```powershell
+# 1) Backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.auth.example .env.auth
+copy .env.ai.example .env.ai
+
+# 2) Ingestion (si lake Parquet absent)
+python pipeline/main_pipeline.py --source .\DATA.XML
+
+# 3) API — terminal 1
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8010 --reload
+
+# 4) Frontend — terminal 2
+cd frontend
+npm install
+# frontend/.env.local → NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8010
+npm run dev
+```
+
+| Service | URL |
+|---------|-----|
+| **Web UI** | http://localhost:3000 |
+| **API health** | http://127.0.0.1:8010/health |
+| **API ready** (lake OK) | http://127.0.0.1:8010/ready |
+| **OpenAPI / Swagger** | http://127.0.0.1:8010/docs |
+
+**Parcours démo recommandé :** login → Dashboard → Sites → Delta → Anomalies → Assistant IA → Power BI.
+
+> Les nouveaux dumps `DATA.XML/` ne doivent **pas** être commités (voir `.gitignore`). Données de démo : [`samples/README.md`](samples/README.md).
 
 ---
 
@@ -59,6 +99,8 @@ L'objectif n'est pas un simple tableau de bord : c'est **Guardian Nexus AI** —
 | **Multi-vendor** | Nokia (production), Huawei (scaffold prêt) |
 | **Auth** | JWT, OTP email/SMS, clés d'accès, rôles admin/responsable, audit activité |
 | **i18n** | Interface Français / English |
+| **Power BI** | Exports décisionnels CSV + rapport `.pbix` (`docs/powerbi/`) |
+| **Mobile** | App Android alimentée par la **même API REST** que le web |
 
 ---
 
@@ -562,8 +604,10 @@ RAN-INTELLIGENCE/
 ├── config/                 # settings, env_loader
 ├── pipeline/               # XML → Parquet
 ├── scripts/                # CLI (audit, ingest, registry)
-├── data/                   # lake, bronze, exports
-└── docs/
+├── data/                   # lake, bronze, exports (généré, non versionné)
+├── samples/                # guide données de démo (pas de dumps NOC)
+├── DATA.XML/               # snapshots locaux (nouveaux dumps ignorés par Git)
+└── docs/                   # runbooks, auth, Power BI, big data
 ```
 
 ---
@@ -575,9 +619,9 @@ RAN-INTELLIGENCE/
 | Python | 3.12+ |
 | Node.js | 22+ |
 | npm | 10+ |
-| DATA.XML | `C:\projects\DATA.XML` (configurable) |
-| PostgreSQL | Optionnel (auth, spares, knowledge) |
-| Docker | Optionnel (déploiement conteneurisé) |
+| DATA.XML | Chemin local configurable (`DATA_XML_ROOT` / `.\DATA.XML`) |
+| PostgreSQL / TimescaleDB | Optionnel (auth, KPI, knowledge) — souvent via Docker |
+| Docker | Optionnel (bases + stack big-data) |
 
 ---
 
@@ -675,6 +719,26 @@ TWILIO_FROM_NUMBER=+10000000000
 ```
 
 OTP réels : `MAILTRAP_API_TOKEN` + `TWILIO_VERIFY_SERVICE_SID` — voir `docs/AUTH_NOTIFICATIONS_SETUP.md`.
+
+---
+
+## Clients web & mobile
+
+Le **frontend Next.js** et l’**application mobile Android** consomment le même backend FastAPI. Docker (TimescaleDB, auth Postgres…) enrichit l’API ; il n’est pas requis pour une démo locale minimale (Parquet + DuckDB).
+
+| Client | Config URL d’API |
+|--------|------------------|
+| Navigateur sur le PC backend | `http://127.0.0.1:8010` |
+| Émulateur Android Studio | `http://10.0.2.2:8010` |
+| Téléphone / autre PC (même Wi‑Fi) | `http://<IP_LAN_PC>:8010` — API lancée avec `--host 0.0.0.0` |
+
+Vérifications utiles avant une démo mobile :
+
+```text
+GET /health   → {"status":"ok"}
+GET /ready    → lake Parquet disponible
+GET /docs     → contrat OpenAPI partagé web + mobile
+```
 
 ---
 
@@ -796,6 +860,7 @@ Guide complet : [`docs/BIG_DATA_MIGRATION.md`](docs/BIG_DATA_MIGRATION.md)
 | Parser Nokia | Production |
 | Parser Huawei | Scaffold — retourne DataFrames vides |
 | Lake Parquet | Généré localement, non versionné (`.gitignore`) |
+| Nouveaux dumps `DATA.XML/` | Ignorés par Git — ne pas pusher les exports NOC |
 | KPI TimescaleDB | Métriques **synthétiques** dérivées du site_state (pas PM réels) |
 | RAG pgvector | Recherche **keyword** ; similarité cosinus à implémenter |
 | OpenAI / Claude | Requièrent clés API dans `.env.ai` |
@@ -810,6 +875,7 @@ Guide complet : [`docs/BIG_DATA_MIGRATION.md`](docs/BIG_DATA_MIGRATION.md)
 4. Orchestrateur J-1 schedulé (Airflow / cron)
 5. Pagination server-side inventaire à grande échelle
 6. Refresh token automatique côté frontend
+7. Jeu de samples anonymisés + message UI si `/ready` = false
 
 ---
 
@@ -817,11 +883,14 @@ Guide complet : [`docs/BIG_DATA_MIGRATION.md`](docs/BIG_DATA_MIGRATION.md)
 
 | Document | Contenu |
 |----------|---------|
+| [`samples/README.md`](samples/README.md) | Données de démo & règles Git pour DATA.XML |
+| [`docs/POWER_BI_SETUP.md`](docs/POWER_BI_SETUP.md) | Export / rapport Power BI |
 | [`docs/PREMIUM_PLATFORM_ROLLOUT.md`](docs/PREMIUM_PLATFORM_ROLLOUT.md) | Trust, ops, assistant, observabilité |
 | [`docs/BIG_DATA_MIGRATION.md`](docs/BIG_DATA_MIGRATION.md) | MinIO, Spark, stratégie scale |
 | [`docs/AUTH_DATABASE.md`](docs/AUTH_DATABASE.md) | PostgreSQL, pgAdmin, setup |
 | [`docs/AUTH_NOTIFICATIONS_SETUP.md`](docs/AUTH_NOTIFICATIONS_SETUP.md) | SMTP Gmail, Twilio SMS |
 | [`docs/PLATFORM_DATABASE.md`](docs/PLATFORM_DATABASE.md) | Schéma activité plateforme |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Exploitation quotidienne & dépannage |
 
 ---
 

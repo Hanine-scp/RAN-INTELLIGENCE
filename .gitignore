@@ -43,6 +43,10 @@ data/trust/
 data/knowledge/
 pipeline/data/
 
+# Snapshots XML opérationnels (ne pas pusher de nouveaux dumps NOC)
+# Les fichiers déjà suivis restent dans l'historique ; les nouveaux dossiers sont ignorés.
+DATA.XML/
+
 # Logs & local DB
 *.log
 *.db
